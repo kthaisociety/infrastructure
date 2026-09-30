@@ -22,21 +22,25 @@ concurrency:
   group: tofu
   cancel-in-progress: false
 
+defaults:
+  run:
+    # An explicit `shell: bash` runs with -o pipefail, so `tofu plan | tee` fails when tofu fails.
+    # The implicit default shell doesn't.
+    shell: bash
+
+# Secrets are set per job, only where tofu needs them. Actions are pinned to commit SHAs because
+# steps in the plan and apply jobs can read those secrets.
 env:
   TOFU_VERSION: 1.12.6
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
-  # Backend: the tfstate instance's CI credential.
-  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  TF_VAR_state_passphrase: ${{ secrets.TF_VAR_state_passphrase }}
 
 jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: opentofu/setup-opentofu@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
       - run: tofu fmt -check -recursive terraform
@@ -49,11 +53,15 @@ jobs:
       run:
         working-directory: terraform/glesys
     env:
+      # Backend: the tfstate instance's CI credential.
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      TF_VAR_state_passphrase: ${{ secrets.TF_VAR_state_passphrase }}
       GLESYS_USERID: ${{ secrets.GLESYS_USERID }}
       GLESYS_TOKEN: ${{ secrets.GLESYS_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: opentofu/setup-opentofu@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
@@ -78,11 +86,15 @@ jobs:
       run:
         working-directory: terraform/glesys
     env:
+      # Backend: the tfstate instance's CI credential.
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      TF_VAR_state_passphrase: ${{ secrets.TF_VAR_state_passphrase }}
       GLESYS_USERID: ${{ secrets.GLESYS_USERID }}
       GLESYS_TOKEN: ${{ secrets.GLESYS_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: opentofu/setup-opentofu@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
