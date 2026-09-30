@@ -6,3 +6,4 @@ crash.log
 *.tfvars
 !*.tfvars.example
 *.json.key
+*.key
