@@ -84,32 +84,40 @@ in the foundation depends on GCP, so there's no GCP project, billing account or 
   *Credentials* belong to an instance and have full access to all of it; there's no per-bucket or
   read-only scoping in the GleSYS API. So we isolate by instance:
 
-  | Instance | Buckets | Who holds a credential |
-  |---|---|---|
-  | `tfstate` | state | CI |
-  | `openbao-snapshots` | snapshots | OpenBao's snapshot sidecar |
-  | existing backups instance | app/database backups | Dokploy |
+  | Instance (ID) | Used by |
+  |---|---|
+  | tfstate (`os-eea34`) | CI: OpenTofu state, bucket `kthais-tfstate` |
+  | `openbao-snapshots` (new) | OpenBao's snapshot sidecar |
+  | `website-psql-backups` (`os-8d2b7`) | Dokploy: backups of the website's Postgres |
+  | `mattermost-backups` (`os-a273a`) | Mattermost's own backups |
+  | `mattermost-file-storage` (`os-558b4`) | Mattermost's live file uploads (production data) |
 
-  A leaked snapshot or backup key then can't touch state, and vice versa.
+  A leaked key for one instance can't touch the others. All are imported into `terraform/glesys` and
+  `prevent_destroy`; consumers keep their existing credentials, which GleSYS can't import.
 - **Managed in `terraform/glesys`** with the official [`glesys/glesys`](https://github.com/glesys/terraform-provider-glesys)
-  provider (`glesys_objectstorage_instance`, `glesys_objectstorage_credential`). Buckets aren't in the
-  GleSYS API; they're created through S3 with the `hashicorp/aws` provider pointed at the GleSYS
-  endpoint. Instances can be imported; credentials can't, so existing ones get replaced by
-  OpenTofu-managed ones and then deleted. Credential secret keys end up in state; state is encrypted.
+  provider (`glesys_objectstorage_instance`, `glesys_objectstorage_credential`). Instances can be
+  imported; credentials can't, so existing ones get replaced by OpenTofu-managed ones and then deleted.
+  Credential secret keys end up in state; state is encrypted.
+- **Buckets** aren't in the GleSYS API. The state bucket is created by hand (it must exist before
+  `tofu init`); the snapshot sidecar creates its own bucket if missing; the backups bucket exists.
 - **Chicken-and-egg:** `terraform/glesys` stores its state in the `tfstate` instance it manages. Create
-  that instance and a first credential by hand in the GleSYS UI, then import the instance. That's the
-  only bootstrap step.
+  that instance, the `kthais-tfstate` bucket and CI's credential by hand in the GleSYS UI, then import
+  the instance. CI's credential stays hand-made: OpenTofu managing the key it runs with would be
+  circular. Rotate it by hand.
 - **State:** one bucket, one key per root module (`glesys/terraform.tfstate`, `dokploy/...`,
   `openbao/...`), via OpenTofu's `s3` backend with the GleSYS endpoint.
 - **Encryption:** OpenTofu state and plan encryption with the `pbkdf2` key provider and `aes_gcm`,
   `enforced = true`. The passphrase lives in 1Password and a GitHub secret. GleSYS only ever stores
   ciphertext.
-- **Locking:** `use_lockfile = true` if GleSYS supports S3 conditional writes (`If-None-Match`). If not,
-  it's still safe: applies run only in CI, one at a time via the workflow's concurrency group, and plans
-  run with `-lock=false`.
+- **No locking:** GleSYS ignores S3 conditional writes (`If-None-Match`; tested 2026-09-30), so
+  OpenTofu's `use_lockfile` can't work. It's still safe: applies run only in CI, one at a time via the
+  workflow's concurrency group, and plans run with `-lock=false`. Never apply from a laptop.
+- **Versioning** is enabled on the state bucket (tested 2026-09-30), so a bad or overwritten state can be
+  restored from an earlier version.
 - **Snapshots:** the `openbao-snapshots` instance. Its credential can read and delete snapshots too,
   since GleSYS can't scope it; bucket versioning (if GleSYS supports it) limits the damage.
-- **App backups:** Dokploy's backup destination is the backups instance we already use.
+- **App backups:** Dokploy's backup destination is `website-psql-backups`; new projects' backups go
+  there too, or get their own instance.
 
 Backend sketch, per root module:
 
@@ -155,8 +163,8 @@ terraform {
   GitHub org tokens), add a second app host, or need Dokploy admins who shouldn't see all secrets.
   Migrating is just restoring a snapshot on the new host.
 - **Deployed by OpenTofu** as a `dokploy_compose` in `terraform/dokploy`, from `dokploy-core/openbao/`.
-  Its unseal key and GleSYS snapshot key are placed on the host by hand, not by OpenTofu: OpenBao can't
-  fetch its own credentials from itself, and we keep them out of state.
+  Its unseal key is placed on the host by hand, not by OpenTofu: OpenBao can't fetch its own key from
+  itself, and we keep it out of state. The snapshot credential comes from `terraform/glesys`.
 - **UI disabled** (`ui = false`), no domain, no public Traefik route. Clients are on the Dokploy Docker
   network. People use the `bao` CLI over SSH port-forward or Tailscale.
 - **Storage:** integrated Raft, single node.
@@ -244,8 +252,9 @@ policy to the same people, and keep non-runtime secrets in paths no Dokploy prov
 ### OpenTofu runs only in CI, never on a laptop
 Every root module is planned on PRs and applied on merge to `main` by GitHub Actions.
 
-- **Secrets:** the `tfstate` credential, the state passphrase, the Dokploy API key and a GleSYS API
-  key (for `terraform/glesys`). GleSYS credentials can't be read-only, so plan and apply use the same
+- **Secrets:** `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (the `tfstate` credential, read by the S3
+  backend), `TF_VAR_state_passphrase`, `GLESYS_USERID` / `GLESYS_TOKEN` (GleSYS API key for
+  `terraform/glesys`), and later the Dokploy API key. GleSYS credentials can't be read-only, so plan and apply use the same
   ones. Plans run with `-lock=false`.
 - **Apply** runs only in the `production` environment, limited to `main`.
 - **Order on merge:** `glesys` → `openbao` → `dokploy`, as jobs in one workflow. `openbao` runs on the
@@ -299,15 +308,14 @@ into `terraform/modules/` and have projects call it.
 ## Phases
 
 ### Phase 1 — GleSYS and GitHub
-1. In the GleSYS UI: create the `tfstate` instance and one credential by hand. Store the credential and a
-   GleSYS API key in 1Password.
+1. In the GleSYS UI: create the `tfstate` instance, a credential on it, and the `kthais-tfstate` bucket
+   (with any S3 client). Create a GleSYS API key. Store both in 1Password.
 2. Generate the state passphrase and store it in 1Password.
 3. GitHub settings: a `production` environment limited to `main`, the secrets above, and branch
    protection on `main`.
-4. Write `terraform/glesys`: import the `tfstate` and backups instances, create the `openbao-snapshots`
-   instance, OpenTofu-managed credentials, and the buckets. Add `tofu.yml` with the `glesys` job.
-   Swap CI and Dokploy over to the new credentials, then delete the hand-made ones.
-5. Test against GleSYS: conditional writes (`use_lockfile`) and bucket versioning.
+4. `terraform/glesys` _(written 2026-09-30)_: imports the four existing instances, and creates the
+   `openbao-snapshots` instance and the snapshot sidecar's credential. `tofu.yml` plans it on PRs and applies it on merge.
+5. _(Done 2026-09-30)_ Tested GleSYS: versioning works, conditional writes don't.
 
 ### Phase 2 — Dokploy core in OpenTofu
 1. We run Dokploy v0.30.8, which is newer than the provider's target (v0.30.7). Keep Dokploy at or above
@@ -317,16 +325,16 @@ into `terraform/modules/` and have projects call it.
 3. CI uses GitHub-hosted runners; the panel's API is reachable from them with the API key.
 4. Write `terraform/dokploy` with core resources only: GHCR `dokploy_registry`, the
    `dokploy_github_provider` data source for the existing GitHub App, the GleSYS backup
-   `dokploy_destination`, and notifications. Import what already exists instead of recreating it.
+   `dokploy_destination` for `website-psql-backups`, and notifications. Import what already exists instead of recreating it.
 5. Add the `dokploy` job to `tofu.yml`. Apply, and confirm the next plan is empty.
 
 ### Phase 3 — Deploy OpenBao
 1. Write `dokploy-core/openbao/`: OpenBao with Raft storage, the `static` seal and `ui = false`, plus a
    snapshot sidecar that uploads to the `openbao-snapshots` instance.
-2. Generate the unseal key, store it in 1Password, and place it and the snapshot credential on the host
-   by hand.
+2. Generate the unseal key, store it in 1Password, and place it on the host by hand. The snapshot
+   credential comes from `terraform/glesys`'s state into the compose's env.
 3. Add `openbao.tf` to `terraform/dokploy`: a project and a `dokploy_compose` with git source
-   `dokploy-core/openbao/`, bind-mounting the keys. Apply via CI.
+   `dokploy-core/openbao/`, bind-mounting the unseal key. Apply via CI.
 4. Run `bao operator init`. Recovery keys go to 1Password, split among key holders.
 5. Verify auto-unseal by restarting the container, and verify a snapshot arrives in GleSYS.
 
@@ -402,7 +410,7 @@ above, and nothing above depends on it. When we pick it up:
    (browser flow) under the same name.
 2. Start a fresh `terraform/dokploy` state: move the old state object in GleSYS aside (e.g. to
    `dokploy-lost-<date>/`) rather than deleting it. Every ID in it points at the dead server.
-3. Place the OpenBao unseal key and snapshot key from 1Password on the host. Apply `terraform/dokploy`
+3. Place the OpenBao unseal key from 1Password on the host. Apply `terraform/dokploy`
    targeting core and OpenBao only.
 4. Restore the latest Raft snapshot from GleSYS. It auto-unseals with the static key, and every secret
    and policy is back.
@@ -413,8 +421,5 @@ above, and nothing above depends on it. When we pick it up:
 
 ## Open questions
 
-- Does GleSYS support S3 conditional writes and bucket versioning?
-- Does the `hashicorp/aws` provider manage buckets on GleSYS cleanly with the usual S3-compatibility
-  flags? If not, create buckets by hand with any S3 client.
 - Does Dokploy block a service from referencing a provider not assigned to its project and environment?
   The docs imply so; test before relying on it.
