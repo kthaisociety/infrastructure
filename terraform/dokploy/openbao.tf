@@ -101,7 +101,7 @@ locals {
 
 resource "dokploy_compose" "openbao" {
   name            = "openbao"
-  description     = "Secrets manager. API only, at https://bao.kthais.com"
+  description     = "Secrets manager, at https://bao.kthais.com"
   environment_id  = dokploy_project.infrastructure.production_environment_id
   compose_type    = "docker-compose"
   app_name_prefix = "openbao"
