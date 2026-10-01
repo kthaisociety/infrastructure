@@ -4,8 +4,14 @@ variable "state_passphrase" {
   sensitive   = true
 }
 
+variable "openbao_initialized" {
+  description = "Set after OpenBao is initialized by hand (runbook Part B). Until then it's off dokploy-network."
+  type        = bool
+  default     = false
+}
+
 variable "openbao_public" {
-  description = "Route bao.kthais.com to OpenBao. Stays false until OpenBao is initialized by hand."
+  description = "Route bao.kthais.com to OpenBao. Needs openbao_initialized."
   type        = bool
   default     = false
 }

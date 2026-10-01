@@ -474,7 +474,7 @@ Every root module is planned on PRs and applied on merge to `main` by GitHub Act
 
 ### 1Password holds break-glass material
 OpenBao recovery keys and static unseal key, the GleSYS API key and the `tfstate` credential, the
-state encryption passphrase, Dokploy admin credentials, the `terraform` user's Dokploy API key, each
+state encryption passphrase, Dokploy admin credentials (including the `terraform` user's password; its API key lives only in GitHub and is rotated by making a new one), each
 infra admin's OpenBao password (their own), the deploy App's private key, and the GHCR pull token. With the repo, GleSYS and the
 1Password vault, anyone can rebuild everything.
 
@@ -583,7 +583,7 @@ Exact steps: [openbao-deploy.md](openbao-deploy.md), Parts A and C.
 4. Generate the unseal key on the host, and store it in 1Password.
 5. `terraform/dokploy` with only the backend, the provider and `openbao.tf` (the infrastructure project
    and the OpenBao compose, with its config, Traefik route and blocked paths inline), and its job in
-   `tofu.yml`. The route starts off (`openbao_public = false`). Core resources wait for Phase 6.
+   `tofu.yml`. It starts off `dokploy-network` and with no route (`openbao_initialized` and `openbao_public` false), so nothing can call `sys/init` before we do. Core resources wait for Phase 6.
    Merge; CI applies.
 6. After Phase 3: turn the route on, and check the certificate, the redirect and every blocked path,
    including path-encoding tricks (verify item 9).

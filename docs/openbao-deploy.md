@@ -53,11 +53,14 @@ In `https://synapse.aisociety.se`, the version is in the sidebar's footer. It mu
 later** (the provider's target). We run v0.30.8.
 
 ### A2. Dokploy API key for OpenTofu
-1. In Dokploy, create a user for OpenTofu (Settings → Users), role **admin**, email
-   `it+dokploy-terraform@kthais.com` or similar. Its password goes to 1Password.
-2. Sign in as that user, Settings → Profile → API keys → Generate. **Turn rate limiting off** (a
-   rate-limited key answers `401` mid-apply). No expiry.
-3. 1Password: item "Dokploy – terraform API key".
+1. In Dokploy, invite a user for OpenTofu (Settings → Users), role **admin** (not owner: `ops@` stays
+   the owner and break-glass account), email `ops+dokploy-terraform@kthais.com`, name `Terraform CI`.
+   Open the invitation link in a private window and set a password; it goes to 1Password.
+2. Sign in as that user, Settings → Profile → API keys → Generate, named
+   `github-actions-infrastructure-<yyyy-mm>`. **Turn rate limiting off** (a rate-limited key answers
+   `401` mid-apply). No expiry.
+3. The key isn't kept anywhere but GitHub. To rotate it, generate a new one, set it, and delete the old
+   one once CI passes. After a disaster Dokploy starts fresh, so an old key would be useless anyway.
 4. GitHub, this repo → Settings → Secrets and variables → Actions:
    - Secret `DOKPLOY_API_KEY`: the key, in both the `plan` and `production` environments (never
      repo-level: any branch could read it). `gh secret set DOKPLOY_API_KEY --env <env>`.
@@ -102,7 +105,8 @@ _Written 2026-10-01 (in the same PR as this runbook)._ New root module. Files an
 - `provider "dokploy"` with `endpoint = "https://synapse.aisociety.se"` (not secret). The key comes
   from the `DOKPLOY_API_KEY` environment variable, like GleSYS's.
 
-**`terraform/dokploy/variables.tf`**: `state_passphrase` and `openbao_public` (bool, default `false`).
+**`terraform/dokploy/variables.tf`**: `state_passphrase`, `openbao_initialized` and `openbao_public`
+(bools, default `false`; flipped by changing the defaults, since `*.tfvars` is gitignored).
 
 **`terraform/dokploy/outputs.tf`**: the infrastructure project's and production environment's IDs, for
 `projects.yaml` and `terraform/openbao`.
@@ -115,9 +119,12 @@ _Written 2026-10-01 (in the same PR as this runbook)._ New root module. Files an
   - `environment.BAO_LOCAL_CONFIG = jsonencode(local.openbao_config)`.
   - `volumes`: `openbao-data:/openbao/file`, and `/etc/openbao/unseal.key` bind-mounted read-only at
     `/openbao/unseal.key` with `create_host_path: false`, so a missing key fails the deploy.
-  - `networks.dokploy-network.aliases = ["openbao"]`; `dokploy-network` declared `external: true`.
+  - `networks`: until `var.openbao_initialized`, only the compose's own `default` network, so no other
+    container can reach the uninitialized OpenBao and call `sys/init`. After, `dokploy-network`
+    (external) with alias `openbao`, for Traefik and Dokploy's server.
   - **No `ports`.** Nothing is published on the host.
-  - `labels`: `local.openbao_labels` when `var.openbao_public`, else `["traefik.enable=false"]`.
+  - `labels`: `local.openbao_labels` when `var.openbao_public`, else `["traefik.enable=false"]`. A
+    precondition refuses `openbao_public` without `openbao_initialized`.
 - `local.openbao_config`:
 
   ```hcl
@@ -156,12 +163,15 @@ secret. On `main`, runs only after `glesys-apply`.
 Merge. CI applies and Dokploy deploys the compose. Then on the host:
 
 ```sh
-docker ps --filter label=com.docker.compose.service=openbao   # one container, Up
+BAO=$(docker ps -q --filter label=com.docker.compose.service=openbao)
+echo "$BAO"                                                     # exactly one container id
 docker logs "$BAO" 2>&1 | tail -20                              # no errors about the seal or storage
 docker exec "$BAO" env BAO_ADDR=http://127.0.0.1:8200 bao status
+docker inspect "$BAO" --format '{{range $n, $_ := .NetworkSettings.Networks}}{{println $n}}{{end}}'
 ```
 
-Expect `Seal Type static`, `Initialized false`. And from a laptop, `curl -sI https://bao.kthais.com`
+Expect `Seal Type static`, `Initialized false`, and one network, `openbao-…_default`: **not**
+`dokploy-network`. If it's on `dokploy-network`, stop: any app could initialize it. And from a laptop, `curl -sI https://bao.kthais.com`
 must **not** reach OpenBao (connection error, or Traefik's 404): there's no route yet.
 
 ---
@@ -250,6 +260,7 @@ exit
 On the host:
 
 ```sh
+BAO=$(docker ps -q --filter label=com.docker.compose.service=openbao)
 docker restart "$BAO"
 sleep 5
 docker exec "$BAO" env BAO_ADDR=http://127.0.0.1:8200 bao status   # Sealed false
@@ -260,8 +271,8 @@ docker exec "$BAO" env BAO_ADDR=http://127.0.0.1:8200 bao status   # Sealed fals
 ## Part C: Make it public
 
 ### C1. The PR
-Set `openbao_public = true` (the default in `variables.tf`, or a `terraform.tfvars` checked in; it isn't
-secret). Merge; CI applies and Dokploy redeploys the compose with the Traefik labels. The first request
+In `terraform/dokploy/variables.tf`, set the defaults of `openbao_initialized` and `openbao_public` to
+`true`. Merge; CI applies and Dokploy redeploys the compose on `dokploy-network` with the Traefik labels. The first request
 may take a minute while Traefik gets the certificate.
 
 ### C2. Check the route and every block
@@ -283,7 +294,8 @@ done
 ```
 
 If any path trick returns what `curl -s $H/v1/sys/init` would return from inside the container
-(`{"initialized":true}`) instead of 403/404, **turn the route off again** (`openbao_public = false`) and
+(`{"initialized":true}`) instead of 403/404, **turn the route off again** (`openbao_public = false`; `openbao_initialized` stays `true`, so
+Dokploy can still reach it) and
 change `bao-blocked` to an allowlist before retrying.
 
 ---
@@ -462,6 +474,7 @@ Once, now, on the host, with a throwaway OpenBao that's never on a network:
 
 ```sh
 # download the newest snapshot from the bucket to /tmp/restore-test.snap (rclone or any S3 client)
+BAO=$(docker ps -q --filter label=com.docker.compose.service=openbao)
 docker run -d --name bao-restore-test --network none \
   -v /etc/openbao/unseal.key:/openbao/unseal.key:ro \
   -e BAO_LOCAL_CONFIG="$(docker inspect "$BAO" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^BAO_LOCAL_CONFIG=//p')" \

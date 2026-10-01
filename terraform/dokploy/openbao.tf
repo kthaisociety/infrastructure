@@ -83,6 +83,11 @@ locals {
   ]
 }
 
+locals {
+  # Traefik and Dokploy's server reach OpenBao on dokploy-network.
+  openbao_network = var.openbao_initialized ? "dokploy-network" : "default"
+}
+
 resource "dokploy_compose" "openbao" {
   name            = "openbao"
   description     = "Secrets manager. API only, at https://bao.kthais.com"
@@ -113,16 +118,22 @@ resource "dokploy_compose" "openbao" {
               bind      = { create_host_path = false }
             },
           ]
-          networks = {
-            dokploy-network = { aliases = ["openbao"] }
-          }
-          # No `ports`: nothing is published on the host. Until it's initialized, no route either:
-          # whoever calls sys/init first would own it.
-          labels = var.openbao_public ? local.openbao_labels : ["traefik.enable=false"]
+          # Whoever calls sys/init first owns OpenBao. Until it's initialized it's on its own compose
+          # network only, so no other container (every app on dokploy-network) can reach it; init
+          # happens from inside the container. No `ports` either: nothing is published on the host.
+          networks = { (local.openbao_network) = { aliases = ["openbao"] } }
+          labels   = var.openbao_public ? local.openbao_labels : ["traefik.enable=false"]
         }
       }
-      networks = { dokploy-network = { external = true } }
+      networks = { (local.openbao_network) = { external = var.openbao_initialized } }
       volumes  = { openbao-data = {} }
     })
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.openbao_initialized || !var.openbao_public
+      error_message = "openbao_public needs openbao_initialized: never route to an uninitialized OpenBao."
+    }
   }
 }
