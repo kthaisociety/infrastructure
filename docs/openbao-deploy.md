@@ -314,9 +314,13 @@ sudo docker run -d --name dokploy-traefik --restart always --network dokploy-net
   -v /var/run/docker.sock:/var/run/docker.sock \
   -p 80:80/tcp -p 443:443/tcp -p 443:443/udp \
   traefik:v3.7.13
-# check sites, then: sudo docker rm dokploy-traefik-old
-# roll back: sudo docker rm -f dokploy-traefik && sudo docker rename dokploy-traefik-old dokploy-traefik && sudo docker start dokploy-traefik
+# roll back, while dokploy-traefik-old still exists:
+#   sudo docker rm -f dokploy-traefik && sudo docker rename dokploy-traefik-old dokploy-traefik && sudo docker start dokploy-traefik
 ```
+
+Keep `dokploy-traefik-old` until the sites have run on the new version for a week, then
+`sudo docker rm dokploy-traefik-old`. After that, rolling back means the same `docker run` on the old
+image (ours was `traefik:v3.1.2`), after `sudo docker rm -f dokploy-traefik`.
 
 Compare with `sudo docker inspect dokploy-traefik-old` first if Dokploy's setup may have changed. Don't
 use Dokploy's "Reload Traefik" until we know it keeps the image.
@@ -614,9 +618,12 @@ For **onboarding-service**, then **landingpage-backend**:
 2. **Write them to OpenBao** in the UI (`https://bao.kthais.com/ui`, Google sign-in):
    `secret/onboarding-service/production` gets one key per secret (`MATTERMOST_BOT_TOKEN`,
    `GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON`, …), and `secret/shared/onboarding-service-secret/production`
-   gets `ONBOARDING_SERVICE_SECRET`, once, not per app. With the CLI from a laptop instead:
-   `bao kv put secret/onboarding-service/production MATTERMOST_BOT_TOKEN=-` and paste the value, so it
-   stays out of shell history.
+   gets `ONBOARDING_SERVICE_SECRET`, once, not per app. With the CLI from a laptop instead,
+   one key at a time, pasting each value so it stays out of shell history: the first key with
+   `bao kv put secret/onboarding-service/production MATTERMOST_BOT_TOKEN=-`, every further key with
+   `bao kv patch secret/onboarding-service/production GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON=-`. `kv put`
+   replaces the whole secret, so a second `put` would delete the keys already there. In the UI, "Create
+   new version" shows the existing keys; add to them, don't replace them.
 3. **Replace values with references** in the app's Environment in the Dokploy UI. In the UI there's no
    `$$` escaping; that's only for HCL:
 
