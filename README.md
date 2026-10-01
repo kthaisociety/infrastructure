@@ -1,7 +1,8 @@
 # infrastructure
 
 Core KTHAIS infrastructure as code, with OpenTofu. See [docs/plan.md](docs/plan.md). Next milestone: OpenBao running and serving secrets to the first two apps, step by step in
-[docs/openbao-deploy.md](docs/openbao-deploy.md). Root token or CI login trouble:
+[docs/openbao-deploy.md](docs/openbao-deploy.md). How apps will be built, released and deployed:
+[docs/delivery-plan.md](docs/delivery-plan.md) (proposed). Root token or CI login trouble:
 [docs/openbao-recovery.md](docs/openbao-recovery.md).
 
 | Path | What | Status |
