@@ -31,7 +31,7 @@ GitHub App) on hold: onboarding-service moves straight to this model instead.
 | Changes | Rare, reviewed by infra admins | Frequent: tag bumps by a bot, project config by PR |
 | Who writes | Humans, by PR | Humans by PR; the deploy bot directly to its image files |
 | CI's OpenBao rights | `terraform`: everything | Only what projects need: `dokploy-project-*` policies, tokens from the `dokploy-provider` role, secret **metadata** (empty paths). Never secret values |
-| CI's Dokploy rights | Admin API key | A key for a user limited to project resources, if Dokploy allows it (open question 3) |
+| CI's Dokploy rights | Admin API key | A key for its own non-admin Dokploy user, `cd-bot`, limited to project resources (open question 3) |
 
 Why split:
 - **Permissions.** The deploy bot needs to commit to `main` without review. In `infrastructure` that would
@@ -96,8 +96,12 @@ runs where.
   report the digest, then ask `deployments` to deploy it to `staging` (if any).
 - Pushing uses the repo's own `GITHUB_TOKEN` (`packages: write`); no extra secret.
 - Each GHCR package grants write only to its own repo, so no repo can publish another app's image.
-- Dokploy pulls with one read-only credential, stored once as a Dokploy registry (`password_wo`) in
-  `infrastructure` (open question 1).
+- **Images are private** (decided 2026-10-02). Dokploy pulls with one read-only credential, stored once
+  as a Dokploy registry (`password_wo`) in `infrastructure`: a classic personal access token with only
+  `read:packages`, from a machine user account. GHCR accepts only classic tokens (and `GITHUB_TOKEN` inside
+  Actions), so neither a fine-grained token nor a GitHub App works: an App's tokens also expire after an
+  hour, and Dokploy stores a fixed password. The machine account is a member with read access to the
+  packages and nothing else; its token lives in 1Password and the `production` environment.
 
 ### The deploy bot: declarative, in git
 
@@ -126,7 +130,7 @@ an org secret for app repos. It can start deploys of existing images and nothing
 
 ## Build order
 
-1. **This plan**, reviewed. Answer the open questions that block step 2 (1, 2, 3).
+1. **This plan**, reviewed. Questions 1–3 are answered; check question 3 against Dokploy's permissions.
 2. **`deployments` repo**: repo, rulesets, `production`/`plan` environments, its own OpenBao JWT role and
    policy (made in `infrastructure`), its Dokploy key. Move the project parts out of `infrastructure`
    with state moves, and confirm an empty plan in both repos.
@@ -141,13 +145,13 @@ an org secret for app repos. It can start deploys of existing images and nothing
 
 ## Open questions
 
-1. **Private or public images.** onboarding-service's repo is private, so its image would be too.
-   Private needs a pull credential: a classic token with only `read:packages`, from a machine account,
-   not a person's. Public needs nothing, but anyone can pull the compiled apps. Recommendation: private.
-2. **A machine GitHub account** for the pull token (and nothing else). Does the org have one?
-3. **Dokploy permissions for `deployments`.** Can a non-admin Dokploy user create projects, apps and
-   vault providers but not touch OpenBao's compose or Dokploy settings? If not, `deployments` uses an
-   admin key, and the split protects OpenBao but not Dokploy.
+1. ~~Private or public images.~~ **Private** (2026-10-02), with a classic `read:packages` token.
+2. ~~A machine GitHub account.~~ **Yes, one is created** for the pull token. It has to be a user account,
+   not a GitHub App (see "Builds"). Name and owner of its credentials to decide.
+3. **Dokploy permissions for `deployments`.** Decided: its own non-admin Dokploy user, `cd-bot`. To
+   check before step 2: can that user create projects, apps and vault providers while being unable to
+   touch the `infrastructure` project (OpenBao's compose) and Dokploy's settings? If not, `cd-bot` needs
+   admin, and the split protects OpenBao's config but not Dokploy.
 4. **Staging.** Which projects get a `staging` environment, and on the same host? It doubles their
    resource use.
 5. **Release tool.** release-please (release PR, changelog, works per language) or semantic-release
