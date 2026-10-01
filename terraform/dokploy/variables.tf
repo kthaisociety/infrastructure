@@ -7,11 +7,11 @@ variable "state_passphrase" {
 variable "openbao_initialized" {
   description = "Set after OpenBao is initialized by hand (runbook Part B). Until then it's off dokploy-network."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "openbao_public" {
   description = "Route bao.kthais.com to OpenBao. Needs openbao_initialized."
   type        = bool
-  default     = false
+  default     = true
 }

@@ -101,8 +101,8 @@ resource "dokploy_compose" "openbao" {
       services = {
         openbao = {
           image = local.openbao_image
-          # The image's entrypoint writes BAO_LOCAL_CONFIG to its config directory, runs `bao server`
-          # on it and drops root.
+          # The image's entrypoint writes BAO_LOCAL_CONFIG to its config directory and runs `bao server`
+          # on it, as the image's `openbao` user (uid 100, gid 1000), never root.
           command     = "server"
           restart     = "unless-stopped"
           environment = { BAO_LOCAL_CONFIG = jsonencode(local.openbao_config) }
