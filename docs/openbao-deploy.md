@@ -487,11 +487,12 @@ resource "vault_jwt_auth_backend_role" "infra_admin" {
 `openbao_oidc_client_secret` (sensitive), and `openbao_admin_emails`, defaulting to sam@, vilhelm@,
 pavlos.spanoudakis@ and max.astrand@kthais.com.
 
-**`terraform/dokploy/openbao.tf`**: `ui = true`, in this same PR, so the login page only exists once the
-Google login does. The public route already passes `/ui` and `/v1/auth/oidc`.
+**`terraform/dokploy/openbao.tf`**: `ui = true`, in this same PR. `openbao-apply` runs before
+`dokploy-apply` (below), so the login page only exists once the Google login does. The public route already passes `/ui` and `/v1/auth/oidc`.
 
 **`tofu.yml`**: an `openbao-apply` job on `main`, `environment: production`,
-`needs: [glesys-apply, dokploy-apply]` on this first run order (see plan, "Bootstrap order"), with
+`needs: glesys-apply`, with `dokploy-apply` now needing `openbao-apply`: the steady-state order
+(plan, "Bootstrap order", steps 5 and 6), and
 `permissions: id-token: write`. Before `tofu init`:
 
 ```sh
@@ -566,7 +567,6 @@ In `terraform/dokploy`:
 
   The version comes from a hash of the token, so a new token reaches Dokploy without anyone bumping a
   number.
-- `tofu.yml`: from now on, `dokploy-apply` needs `openbao-apply` (the steady-state order).
 
 Merge. `verify_connection` proves every token works from Dokploy's server over `dokploy-network`.
 
