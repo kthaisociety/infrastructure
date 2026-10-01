@@ -336,7 +336,7 @@ the only deploy authority: it records which image each app runs, in git, and Ope
 4. It commits the new tag to the project's own file (`terraform/projects/<project>/image.yaml`, next to
    its `project.yaml`, one per project so tag commits never conflict) on `main`, then runs the `terraform/dokploy` apply in the
    same run, in the same concurrency group as `tofu.yml`. `terraform/dokploy` reads each project's
-   `image.yaml` next to its `project.yaml` (`environment: tag`), and `modules/app` sets each
+   `image.yaml` next to its `project.yaml` (`environment: tag`), and `modules/project` sets each
    environment's image to `ghcr.io/kthaisociety/<project>:<tag>`; a project without one stays on its
    GitHub App source.
 5. The image change redeploys the app (`deploy_on_change`). A failed deploy fails the apply, so the
