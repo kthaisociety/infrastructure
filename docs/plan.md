@@ -3,9 +3,10 @@
 _Written 2026-09-29. Revised 2026-09-30: Dokploy managed with OpenTofu, state and backups on GleSYS, no
 GCP dependency for the foundation. Revised again 2026-09-30: lessons from the DD2482 prototype, OpenBao's
 deployment and bootstrap order settled, app delivery through this repo, OpenBao's API public with no
-personal logins for now, and phases reordered so OpenBao comes first. Status (2026-10-01): `terraform/glesys`
-applied, CI secrets in the `plan` and `production` environments, OpenBao deployed by `terraform/dokploy`
-and initialized by hand (runbook Parts A–B done); Part C (public route) in progress._
+personal logins for now, and phases reordered so OpenBao comes first. Revised 2026-10-01: people log in
+to OpenBao with Google and the UI is on; projects are folders read by shared modules. Status
+(2026-10-01): `terraform/glesys` applied; OpenBao deployed by `terraform/dokploy`, initialized by hand and
+public at `bao.kthais.com` (runbook Parts A–C done). Next: Part D._
 
 **Next milestone:** OpenBao defined in this repo, running on the VPS, and serving secrets to one or two
 apps (Phases 2–5). Everything after that is ordered but not scheduled.
@@ -27,11 +28,11 @@ Dokploy, including which version of each app runs. GCP resources come later (see
 |---|---|---|
 | State and backups | GleSYS object storage, one instance per consumer; OpenTofu state encrypted client-side | `terraform/glesys` |
 | Dokploy core | GHCR registry, GitHub App lookup, backup destination, notifications | `terraform/dokploy/core.tf` |
-| OpenBao | A `dokploy_compose` on the VPS: Raft, static-key auto-unseal, no UI, API at `bao.kthais.com` | `terraform/dokploy/openbao.tf` |
+| OpenBao | A `dokploy_compose` on the VPS: Raft, static-key auto-unseal, API and UI at `bao.kthais.com` | `terraform/dokploy/openbao.tf` |
 | OpenBao snapshots | A second compose that uploads Raft snapshots to GleSYS on a cron | `terraform/dokploy/openbao.tf` |
-| OpenBao config | KV mount, auth for CI and infra admins, one policy and token per project-environment | `terraform/openbao` |
-| Secrets providers | One Dokploy vault provider per project-environment | `terraform/dokploy/vault.tf` |
-| Projects | Everything each project runs, including the image it runs | `terraform/dokploy/projects/<project>/` |
+| OpenBao config | KV mount, auth for CI (GitHub) and people (Google), one policy and token per project-environment | `terraform/openbao` |
+| Secrets providers | One Dokploy vault provider per project-environment | `terraform/dokploy`, from each `project.yaml` |
+| Projects | One folder per project: a `project.yaml` both roots read, built by a shared module per app type | `terraform/projects/<project>/`, `terraform/modules/` |
 | Deploys | App repos build images; this repo records the tag in git and applies | `.github/workflows/deploy.yml` |
 
 Every change to any of it goes through a PR to this repo, and only this repo's CI applies it.
@@ -174,11 +175,11 @@ it with its own `key`.
   static seal it sits on the host next to OpenBao's data. That doesn't change our threat model, since
   host root can already read every app's secret. What matters still holds: a snapshot stolen from GleSYS
   is useless without the key, which lives only on the host and in 1Password.
-- **No UI** (`ui = false`). The API is public at `bao.kthais.com` for CI (see
-  [OpenBao's API is public](#openbaos-api-is-public-hardened)). Dokploy's server and the snapshot job
-  reach it at `http://openbao:8200` on `dokploy-network`. Infra admins run the `bao` CLI inside the
-  container (`ssh` to the host, then `docker exec`), against `http://127.0.0.1:8200`. No port is
-  published on the host at all.
+- **UI behind Google sign-in** (`ui = true` from Phase 4; off until then). The API and UI are public at
+  `bao.kthais.com` (see [OpenBao's API is public](#openbaos-api-is-public-hardened)). Dokploy's server
+  and the snapshot job reach it at `http://openbao:8200` on `dokploy-network`. The break-glass
+  `userpass` login works only inside the container (`ssh` to the host, then `docker exec`), against
+  `http://127.0.0.1:8200`. No port is published on the host at all.
 
 ### OpenBao's deployment: a compose file written in OpenTofu
 _Changed 2026-09-30._ OpenBao is a `dokploy_compose` in `terraform/dokploy/openbao.tf` whose compose file
@@ -292,12 +293,13 @@ the isolation boundary:
 - **Shared secrets** (e.g. `ONBOARDING_SERVICE_SECRET`, which both `landingpage-backend` and
   onboarding-service need) live at `shared/<name>/<environment>`, and only the policies of the projects
   that need them can read it.
-- **Who writes secrets:** infra admins, for now (see
-  [No personal logins](#no-personal-logins-for-now-infra-admins-over-ssh)). Later, each project's owners
+- **Who writes secrets:** infra admins, in the UI (see
+  [People log in with Google](#people-log-in-with-google-userpass-is-break-glass)). Later, each project's owners
   write their own `secret/data/<project>/*`. OpenTofu never writes app secrets; the one exception is
   `infrastructure/production`, which only OpenTofu writes.
-- **One list of projects and environments**, `terraform/projects.yaml`, read by both root modules and by
-  the deploy workflow, so adding a project is one entry.
+- **One folder per project**, `terraform/projects/<project>/project.yaml`, read by both root modules and
+  by the deploy workflow, so adding a project is adding a folder (see
+  [Projects are folders](#projects-are-folders-built-by-shared-modules)).
 
 ### Provider tokens: periodic orphans from a token role, renewed by apply
 Tokens are created by OpenTofu, not a script: with ~16 projects × environments there are too many to
@@ -327,11 +329,11 @@ the only deploy authority: it records which image each app runs, in git, and Ope
 1. The app repo's CI, on `main`: test, build, push `ghcr.io/kthaisociety/<project>:<sha>`.
 2. Its last step triggers this repo's `deploy.yml` (`workflow_dispatch`) with `project`, `environment`
    and `tag`.
-3. `deploy.yml` checks the request: the project and environment exist in `projects.yaml`, and the tag
+3. `deploy.yml` checks the request: the project and environment exist in its `project.yaml`, and the tag
    exists in that project's GHCR package. It can't check which repo sent the request: every app repo
    uses the same App, so the caller's identity isn't in the dispatch.
-4. It commits the new tag to the project's own file (`terraform/dokploy/projects/<project>/image.auto.tfvars`,
-   one per project so tag commits never conflict) on `main`, then runs the `terraform/dokploy` apply in the
+4. It commits the new tag to the project's own file (`terraform/projects/<project>/image.yaml`, next to
+   its `project.yaml`, one per project so tag commits never conflict) on `main`, then runs the `terraform/dokploy` apply in the
    same run, in the same concurrency group as `tofu.yml`.
 5. The image change redeploys the app (`deploy_on_change`). A failed deploy fails the apply, so the
    workflow run is the deploy's result, and the app repo sees it through the dispatch.
@@ -350,7 +352,7 @@ the only deploy authority: it records which image each app runs, in git, and Ope
 
 **The one credential app repos hold:** an org-owned GitHub App, installed only on this repo, with
 `actions: write` and nothing else. App repos get its ID and private key as org secrets, available to the
-repos in `projects.yaml`. With it they can start this repo's workflows; they can't push code, read
+repos named in the `project.yaml` files. With it they can start this repo's workflows; they can't push code, read
 secrets or reach Dokploy. The worst a leaked key, or any app repo, can do is deploy a tag that already
 exists in some project's GHCR package: roll a project back or forward to an image its own repo built.
 Each GHCR package grants write access only to its app's repo, so no one can get an arbitrary image
@@ -382,9 +384,64 @@ apply `main`. It's one credential for the whole org, kept in 1Password with ever
   first (Phase 7). It stays the fallback for a project that has no CI yet, but it builds on the VPS and
   has no place for tests or scans.
 
+### Projects are folders, built by shared modules
+_Decided 2026-10-01._ Adding a project should be adding a folder and merging, with OpenBao and Dokploy
+wired up by the same apply.
+
+- **`terraform/projects/<project>/project.yaml`** is the only file a standard project needs. Both roots
+  find projects with `fileset(path.module, "../projects/*/project.yaml")`; there's no list to edit.
+
+  ```yaml
+  name: onboarding-service
+  repo: kthaisociety/onboarding-service
+  type: app                      # which shared module builds it
+  environments:
+    production:
+      domain: onboarding.kthais.com
+      port: 8080
+      env:                       # non-secret, written as-is
+        LOG_LEVEL: info
+      secrets:                   # names only; values live in OpenBao
+        - MATTERMOST_BOT_TOKEN
+        - GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON
+      shared: [onboarding-service-secret]
+  ```
+
+- **Two shared modules, one per root**, because the wiring spans both and they must stay separate
+  (`terraform/dokploy` plans on PRs; `terraform/openbao` can't).
+  - `modules/app-secrets` (in `terraform/openbao`), per environment: the `dokploy-project-<project>-<env>`
+    policy, its token, and an empty `secret/<project>/<env>` entry (metadata only, no data) so the path
+    is there in the UI to fill.
+  - `modules/app` (in `terraform/dokploy`), per environment: the Dokploy project and environment, the
+    vault provider `<project>-<env>` with that token, and the services. Env is the plain `env` values
+    plus one generated reference per secret name, so nobody hand-writes
+    `${{vault.<provider>.<path>:<KEY>}}`, and no secret value is in git or state.
+- **App types.** The default `type: app` is an application plus Postgres and Redis, each optional in
+  `project.yaml`. Variants (a static site, a compose stack, a worker) become their own types as they come
+  up. A project that fits no type gets its own module in `terraform/dokploy/projects/<project>/` and one
+  line in `projects.tf`; it still uses `modules/app-secrets`, so its OpenBao side is the same.
+- **UI-managed projects** (before Phase 7) have `managed: false` and their Dokploy project and environment
+  IDs in `project.yaml`. Only `app-secrets` and the vault provider apply to them; the services stay in the
+  UI. Not through the `dokploy_project` data source, which would copy shared env vars into state.
+- **A new project's first deploy waits for its secrets.** The PR plan can't see the new token (OpenBao
+  applies only on `main`), so `modules/app` reads it with `try()`; on `main`, `openbao` applies first. A
+  new project starts with `deploy: false` until an admin has filled its path (verify item 11).
+- **Domains need DNS and a route.** `domain:` makes a `dokploy_domain` (the Traefik route and its
+  certificate). The DNS record is still a PR in `dnscontrol`, the only place DNS is managed. Without the
+  record Let's Encrypt can't validate; without the route Traefik answers 404 on its default certificate.
+
+### Dokploy's Traefik is kept current by hand
+_2026-10-01._ Dokploy doesn't upgrade an existing Traefik container when Dokploy itself is upgraded. Ours
+was still 3.1.2 on Docker Engine 29.8.1, which refuses the old API version Traefik before 3.6.1 asks
+for, so Traefik's Docker provider had silently stopped: every route came from Dokploy's files, and any
+service routed by labels (OpenBao, compose domains) got Traefik's 404. We recreated `dokploy-traefik` by
+hand on `traefik:v3.7.13` with the same binds, ports and network (runbook C0). Unverified whether
+Dokploy's "Reload Traefik" recreates it on Dokploy's pinned image; don't use it until checked.
+
 ### OpenBao's API is public, hardened
 _Decided 2026-09-30._ OpenBao's API is routed by Traefik at `bao.kthais.com`, with a Let's Encrypt
-certificate. The UI stays off.
+certificate. The UI is on from Phase 4, behind Google sign-in (see
+[People log in with Google](#people-log-in-with-google-userpass-is-break-glass)).
 
 - **Why:** `terraform/openbao` has to call OpenBao's API (mounts, policies, auth, tokens), and Dokploy's
   API can't do that for it. Its only link to OpenBao is reading secrets through the vault providers. A
@@ -393,18 +450,19 @@ certificate. The UI stays off.
   placed on the host by hand, and a two-pass first build, all for one job. **Also rejected:** Tailscale
   in CI, a new dependency and secret we don't otherwise need.
 - **Why it's safe:** OpenBao is built to face the internet over TLS, with every request authenticated.
-  There's nothing to guess on the public side: CI logs in with GitHub's OIDC token, which only this
-  repo's `production` environment can get, and there are no personal logins. Host root already exposes
+  CI logs in with GitHub's OIDC token, which only this repo's `production` environment can get, and
+  people log in with Google, limited to an allowlist of kthais.com accounts. Host root already exposes
   every secret, so a closed network would protect less than it looks. The hardening below is defense in
   depth, and each piece is tested before an app depends on OpenBao.
 
 Hardening, all in the Traefik labels and OpenBao config in `openbao.tf`:
-- **Only CI's login path is public.** Traefik blocks `/v1/auth/userpass/` (infra admins, below) and the
+- **Only the GitHub (CI) and Google (people) login paths are public.** Traefik blocks `/v1/auth/userpass/`
+  (the break-glass login, below) and the
   root-recovery endpoints `/v1/sys/generate-root`, `/v1/sys/rekey`, `/v1/sys/rotate/recovery` and
   `/v1/sys/init`. `generate-root` accepts calls with no token; guessing the recovery keys is
   infeasible, but there's no reason to offer it. Blocked means Traefik answers 403 (an `ipAllowList`
   middleware that allows nothing). All of these still work from inside the container.
-- **Admin tokens only work from inside the container.** Every `userpass` user has
+- **`userpass` tokens only work from inside the container.** Every `userpass` user has
   `token_bound_cidrs = 127.0.0.1/32`, and only `docker exec` reaches OpenBao from `127.0.0.1`; a request
   through Traefik or from Dokploy comes from a `dokploy-network` address. So even a stolen admin
   password or token is useless without shell on the host. The admin policy requires that value on
@@ -416,27 +474,33 @@ Hardening, all in the Traefik labels and OpenBao config in `openbao.tf`:
   with a short TTL. Its policy is effectively admin (it writes policies), so the binding is what
   protects it. PRs don't plan `terraform/openbao` (see Phase 4).
 
-### No personal logins for now; infra admins over SSH
-_Decided 2026-09-30._ Until the identity service exists (see
-[Later: people log in through the identity service](#later-people-log-in-through-the-identity-service)),
-nobody logs in to OpenBao from their own machine.
+### People log in with Google; `userpass` is break-glass
+_Decided 2026-10-01, replacing "no personal logins for now" (2026-09-30)._ Editing secrets inside the
+container over SSH was too error-prone for day-to-day changes, and the identity service is months away.
+OpenBao's OIDC auth method trusts Google directly.
 
-- **Infra admins** (2–3 people) have `userpass` logins that only work inside the container, reached
-  with `ssh` and `docker exec`: the login path is blocked at Traefik and the tokens are bound to
-  `127.0.0.1`. Tokens last an hour. Infra admins need SSH and Docker on the host, which already means
-  they can read every deployed secret, so this grants nothing new.
-- **What they can do:** read and write every project's KV paths except `infrastructure/`, and manage
-  the `userpass` users (so one admin can add another). Nothing under `sys/`: mounts, policies, auth
-  methods and tokens change only through `terraform/openbao` in CI.
-- **The first admins are created by hand** in Phase 3, with the root token, before it's revoked. The
-  `userpass` mount and the `infra-admin` policy are in `terraform/openbao`; the users and their
-  passwords aren't, so no password is in state. Passwords are in each admin's 1Password. Their logins
-  work once Phase 4 has created the policy.
-- **App owners don't log in.** They hand secrets to an infra admin through 1Password, and the admin
-  writes them with `bao kv put` / `bao kv patch`.
-- **Why:** the identity service is the right way to let people in, and it will take a while. Pointing
-  OpenBao at Google directly in the meantime would need a temporary Google OAuth client and a login
-  path we'd later remove. Keeping it to 2–3 admins over SSH adds nothing public.
+- **Google OAuth client** `openbao` in `clean-healer-452020-n9`, made by hand (GCP isn't in OpenTofu
+  yet). Internal consent screen, so only kthais.com Workspace accounts can sign in. Redirect URIs: the UI's
+  `https://bao.kthais.com/ui/vault/auth/oidc/oidc/callback` and the CLI's
+  `http://localhost:8250/oidc/callback`. Client ID and secret are in 1Password and in the `production`
+  environment as `OPENBAO_OIDC_CLIENT_ID` and `OPENBAO_OIDC_CLIENT_SECRET`.
+- **Role `infra-admin`** on the `oidc` mount, bound to `hd = kthais.com` (Workspace accounts, whose emails Google
+  has verified) and an exact email allowlist (`openbao_admin_emails` in `terraform/openbao`): sam@, vilhelm@,
+  pavlos.spanoudakis@ and max.astrand@kthais.com. Tokens last an hour and carry the `infra-admin`
+  policy. Adding or removing a person is a PR here.
+- **What `infra-admin` can do:** read and write every project's KV paths except `infrastructure/`, and
+  manage `userpass` users. Nothing under `sys/`: mounts, policies, auth methods and tokens change only
+  through `terraform/openbao` in CI.
+- **The trade-off:** a token from a Google login isn't bound to `127.0.0.1`; it works from anywhere for
+  its hour. Workspace sign-in (with its 2FA), the allowlist, the short TTL and the policy protect it,
+  instead of SSH. Accepted, for a UI people will actually use.
+- **`userpass` is the break-glass login**, for when Google or the OAuth client is broken. Users are
+  created by hand (Part B made `sam` and `vilhelm`), the login path is blocked at Traefik and tokens are
+  bound to `127.0.0.1`, so it only works inside the container. Passwords are in each admin's 1Password
+  and never in state.
+- **App owners don't log in yet.** They hand secrets to an admin through 1Password. Per-project owners
+  can come later (see
+  [Later: per-project owners](#later-per-project-owners-and-the-identity-service)).
 
 ### Access control, and its limits
 OpenBao policies give per-path, per-operation control. Some things can't be prevented on any platform:
@@ -446,7 +510,7 @@ OpenBao policies give per-path, per-operation control. Some things can't be prev
 | Secret owners, via OpenBao policies | Exactly the paths they're granted |
 | Operators of a service, via Dokploy access | That service's secrets (exec into the container) |
 | Dokploy admins and anyone with host root | Everything |
-| Infra admins, via SSH and `userpass` | Every project's secrets (not `infrastructure/`) |
+| Infra admins, via Google or `userpass` | Every project's secrets (not `infrastructure/`) |
 | This repo's CI | Everything in Dokploy and OpenBao |
 
 So: keep Dokploy admins and SSH users to a minimum, give each project's Dokploy access and OpenBao
@@ -527,16 +591,17 @@ in the same run.
 ```
 infrastructure/                       # github.com/kthaisociety/infrastructure (public)
   terraform/
-    projects.yaml # every project: environments, source repo; read by openbao/, dokploy/ and deploy.yml
+    projects/<project>/project.yaml  # one folder per project; read by openbao/, dokploy/ and deploy.yml  [todo]
     glesys/       # object storage instances, credentials                            — CI                [written]
     dokploy/      # one root module for everything on Dokploy                         — CI                [todo]
       core.tf     #   GHCR registry, GitHub App lookup, backup destination, notifications
       openbao.tf  #   OpenBao compose (config and Traefik route inline) and the openbao-snapshots compose
-      vault.tf    #   one dokploy_vault_provider per project-environment, tokens from openbao state
-      projects.tf #   module "<project>" { source = "./projects/<project>" } per project
-      projects/<project>/  # everything one project runs: project, environments, apps, DBs, domains, backups, image tag
-    openbao/      # KV v2, JWT auth for CI, userpass for infra admins, token role, policies, tokens — CI [todo]
-    modules/      # shared modules, extracted from projects/ once patterns repeat                  [later]
+      projects.tf #   modules/app for every project.yaml (vault provider, services); custom modules by name
+      projects/<project>/  # only for projects that fit no app type
+    openbao/      # KV v2, JWT auth for CI, Google OIDC and userpass for people, token role, policies — CI [todo]
+    modules/
+      app-secrets/ # OpenBao side of a project: policy, token, empty KV path                      [todo]
+      app/        # Dokploy side of a project, one per app type (default: app + Postgres + Redis) [todo]
     gcp/          # GCP projects, OAuth clients, etc.                                               [later]
   docs/
     openbao-deploy.md  # exact steps from no OpenBao to two apps using it (Phases 2–5)           [written]
@@ -556,9 +621,9 @@ clear exactly what a project runs. With ~16 apps, one state and one plan are man
 deploys) get slow or the blast radius gets uncomfortable, split projects into their own root modules
 later; `deploy.yml` then applies only the affected project's module.
 
-Project modules start as plain, explicit resources, even if they repeat each other. Once two or three
-projects share a clear pattern (e.g. "Go backend + Postgres + domain + daily backup + image from GHCR"),
-we extract it into `terraform/modules/` and have projects call it.
+Projects use the shared modules from the start (see
+[Projects are folders](#projects-are-folders-built-by-shared-modules)); a project that fits no app type
+gets its own module under `dokploy/projects/<project>/`.
 
 ## Phases
 
@@ -576,7 +641,7 @@ we extract it into `terraform/modules/` and have projects call it.
 5. _(Done 2026-09-30)_ Tested GleSYS: versioning works, conditional writes don't.
 
 ### Phase 2 — OpenBao on Dokploy
-Exact steps: [openbao-deploy.md](openbao-deploy.md), Parts A and C.
+_Done 2026-10-01._ Exact steps: [openbao-deploy.md](openbao-deploy.md), Parts A and C.
 
 1. Keep Dokploy at or above the provider's target (we run v0.30.8; provider 1.8.0 targets v0.30.8).
 2. Create the Dokploy `terraform` admin user and its API key (rate limiting off), into 1Password and
@@ -591,7 +656,7 @@ Exact steps: [openbao-deploy.md](openbao-deploy.md), Parts A and C.
    including path-encoding tricks (verify item 9).
 
 ### Phase 3 — Initialize OpenBao, by hand
-Exact steps: [openbao-deploy.md](openbao-deploy.md), Part B. Inside the container, before the route is
+_Done 2026-10-01._ Exact steps: [openbao-deploy.md](openbao-deploy.md), Part B. Inside the container, before the route is
 public:
 
 1. `bao operator init`. Recovery keys go to 1Password, split among key holders.
@@ -604,33 +669,35 @@ public:
 Exact steps: [openbao-deploy.md](openbao-deploy.md), Part D.
 
 1. Write `terraform/openbao/`: KV v2 at `secret`, the file audit device, the `dokploy-provider` token
-   role, the `infra-admin` policy, and, from `projects.yaml`, a policy and token per
-   project-environment. Plus `infrastructure/production`: the GleSYS snapshot credential and the
+   role, the `infra-admin` policy, Google OIDC with the `infra-admin` role, and `modules/app-secrets`
+   for every `project.yaml`. Plus `infrastructure/production`: the GleSYS snapshot credential and the
    snapshot token. Import what Phase 3 made (the JWT mount, config and role, the `terraform` policy, the
    `userpass` mount).
 2. Add the `openbao` job to `tofu.yml` (GitHub-hosted, logs in with the JWT role), and the weekly
    schedule. There's no `terraform/openbao` plan on PRs: CI's OpenBao login is bound to `production`,
    which only runs on `main`, and a read-only PR login would still read every secret while refreshing
    state. PRs get `fmt` and `validate`; the apply run prints its plan first. Merge; CI applies.
-3. Check that an admin can log in inside the container, and that the same token is refused through
-   `bao.kthais.com`.
+   The same PR turns the UI on (`ui = true` in `terraform/dokploy`), so the login page never appears
+   before the Google login exists.
+3. Check Google sign-in in the UI, that an account outside the allowlist is refused, that a `userpass`
+   login works inside the container, and that its token is refused through `bao.kthais.com`.
 
 ### Phase 5 — Connect Dokploy to OpenBao, and the first apps
 Exact steps: [openbao-deploy.md](openbao-deploy.md), Part E.
 
 The first apps use OpenBao while they're still managed in the Dokploy UI. Their vault providers are
 OpenTofu resources, assigned to the existing projects by the Dokploy project and environment IDs
-written in `projects.yaml`. Not through the `dokploy_project` or `dokploy_environment` data sources:
+written in their `project.yaml` (`managed: false`). Not through the `dokploy_project` or `dokploy_environment` data sources:
 those copy each project's shared env vars, which are secrets today, into state. The apps themselves aren't touched by OpenTofu until Phase 7. That's consistent with "OpenTofu owns a
 service completely, or not at all": a provider is its own resource, not part of the service.
 
-1. Add `vault.tf` to `terraform/dokploy`: a `dokploy_vault_provider` per project-environment in
-   `projects.yaml`, tokens from `terraform/openbao`'s state as `token_wo`, `verify_connection = true`.
+1. Add the vault providers to `terraform/dokploy`: a `dokploy_vault_provider` per project-environment
+   from the `project.yaml` files, tokens from `terraform/openbao`'s state as `token_wo`, `verify_connection = true`.
 2. Add the `openbao-snapshots` compose to `openbao.tf`, its env only references. Apply.
 3. Verify a snapshot arrives in GleSYS, and restore it on a throwaway OpenBao with the same unseal key.
 4. First apps: **onboarding-service** and **landingpage-backend**. They share
    `ONBOARDING_SERVICE_SECRET`, so they also prove the `shared/` path. An infra admin writes their
-   secrets to OpenBao, then replaces the values in each app's env in the Dokploy UI with references,
+   secrets in the OpenBao UI, then replaces the values in each app's env in the Dokploy UI with references,
    and redeploys. Keep the old values in 1Password until both apps have run on references for a week.
 5. Answer verify items 1 and 2 (per-environment assignments, token renewal).
 
@@ -655,18 +722,19 @@ mount to an env reference (base64 in `GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON`), becau
 content would end up in state.
 
 For each project:
-1. Add it to `projects.yaml` and apply, so its policies, token and vault provider exist. An infra
-   admin writes its secrets to `<project>/<environment>`.
-2. Write `terraform/dokploy/projects/<project>/`. Generate `import` blocks with the provider's
-   `dogfood/generate_imports.py` (read-only), then hand-write the config: env holds only non-secrets
-   and `$${{vault.…}}` references, database passwords use `database_password_wo`.
+1. If it isn't there yet, add its folder with `managed: false` and apply, so its policy, token and
+   vault provider exist. An infra admin writes its secrets to `<project>/<environment>`.
+2. Fill in its `project.yaml` (type, domain, env, secret names) and set `managed: true`; a project that
+   fits no type gets a module in `terraform/dokploy/projects/<project>/`. Generate `import` blocks with
+   the provider's `dogfood/generate_imports.py` (read-only) so existing services are adopted, not
+   recreated. Database passwords use `database_password_wo`.
 3. Plan until the only diffs are the intended ones (secrets → references, plus the expected
    `deploy_on_change`/`deployment_timeout` diff after import). Apply; the service redeploys.
 4. Tell the project's maintainers that config changes now go through PRs here.
 
 ### Phase 8 — Deploys through this repo
 1. Create the deploy GitHub App (org-owned, installed on this repo only, `actions: write`). Its ID and
-   private key become org secrets, available to the repos listed in `projects.yaml`.
+   private key become org secrets, available to the repos named in the `project.yaml` files.
 2. Write `build.yml` (reusable, called by app repos: test, build, push to GHCR, dispatch) and
    `deploy.yml` (validate, commit the tag, apply `terraform/dokploy`). Tags live in one file per
    project, so tag commits never conflict.
@@ -675,7 +743,7 @@ For each project:
 4. Then the rest, one project per PR. A project without CI stays on the GitHub App source until it has
    some.
 
-Once a few projects are in, extract repeated patterns into `terraform/modules/`. Write
+Add app types to `terraform/modules/app` as projects need them. Write
 `docs/runbook.md` along the way: disaster recovery, token rotation, adding a secret path, adding a
 project, adding an infra admin, rolling back a deploy.
 
@@ -695,26 +763,31 @@ fails, the decision it supports is revisited before building on it.
 | 7 | GleSYS supports versioning on the `openbao-snapshots` instance's bucket | 5 | Accept that the snapshot credential can delete snapshots; keep a second copy elsewhere |
 | 8 | `docker exec` requests reach OpenBao from `127.0.0.1`, and requests through Traefik don't | 4 | Bind admin tokens to the container's own address instead |
 | 9 | Traefik's path blocks can't be bypassed by path encoding or double slashes (`/v1//sys/...`, `%2F`) | 2 | Allowlist paths instead of blocking them |
+| 10 | Writing only KV v2 metadata makes an empty path that shows in the UI | 4 | The path appears on the admin's first write instead |
+| 11 | Dokploy fails a deploy whose reference names a missing key, rather than deploying an empty value | 5 | `deploy: false` becomes mandatory until the path is filled |
 
-## Later: people log in through the identity service
+Results so far:
+- **9, checked 2026-10-01:** double slashes, dot segments, `%69`-style escapes, trailing slashes and
+  query strings all get Traefik's 403. `%2F` (e.g. `/v1/sys%2Finit`) and uppercase (`/v1/SYS/init`) pass
+  Traefik and reach OpenBao, but no real handler: OpenBao doesn't decode `%2F` into a path separator
+  (`/v1/sys%2Fhealth` is a 405 too) and its paths are case-sensitive. Acceptable; tighten later by
+  rejecting encoded slashes at Traefik.
 
-Once the [identity service](identity-service.md) exists and verifies Google sign-ins correctly (its
-Step 1), OpenBao becomes one of its OIDC clients, and app owners log in with
-`bao login -method=oidc` to manage their own projects' secrets.
+## Later: per-project owners, and the identity service
 
-- **OpenBao is a confidential client** of the identity service, with the CLI's loopback callback
-  `http://localhost:8250/oidc/callback` as its one redirect URI. `terraform/openbao` configures the OIDC
-  auth method and sets the client secret.
-- **Where access is decided is open.** Either the identity service puts groups or roles in its tokens and
-  OpenBao maps them to policies, or the identity service only proves who someone is and `projects.yaml`
-  lists each project's owners by email, which `terraform/openbao` turns into roles. The second keeps
-  every access change a reviewed PR here. Decide when the identity service is built.
-- **Either way, people never get admin.** OIDC logins only reach their own projects' KV paths.
-  Everything under `sys/` stays with CI, which logs in with GitHub's OIDC and doesn't depend on the
-  identity service, so a broken or compromised identity service can't change OpenBao's configuration.
-- **The identity service's own secrets live in OpenBao.** That loop is fine while it runs, since Dokploy
-  resolves secrets at deploy time. If it breaks, infra admins (inside the container) and CI still get in.
-- The infra admins' `userpass` logins stay, as the path that doesn't depend on the identity service.
+People already log in with Google (see
+[People log in with Google](#people-log-in-with-google-userpass-is-break-glass)), but only as infra
+admins.
+
+- **Per-project owners** don't need the identity service: an `owners:` list of emails in a project's
+  `project.yaml` becomes an OIDC role scoped to that project's KV paths, made by
+  `modules/app-secrets`. Every access change stays a reviewed PR here.
+- **The [identity service](identity-service.md)**, once it exists and verifies Google sign-ins correctly
+  (its Step 1), can replace Google as OpenBao's OIDC issuer, with the same roles. Decide then whether
+  groups come from its tokens or stay as emails in `project.yaml`.
+- **People never get `sys/`.** Mounts, policies and auth stay with CI, which logs in with GitHub's OIDC
+  and depends on neither Google nor the identity service.
+- **`userpass` stays** as the break-glass login inside the container.
 
 ## Later: GCP as code
 
