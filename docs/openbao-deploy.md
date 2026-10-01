@@ -59,7 +59,8 @@ provider's target). We run v0.30.8.
    rate-limited key answers `401` mid-apply). No expiry.
 3. 1Password: item "Dokploy – terraform API key".
 4. GitHub, this repo → Settings → Secrets and variables → Actions:
-   - Secret `DOKPLOY_API_KEY`: the key (repo-level, since PR plans need it too).
+   - Secret `DOKPLOY_API_KEY`: the key, in both the `plan` and `production` environments (never
+     repo-level: any branch could read it). `gh secret set DOKPLOY_API_KEY --env <env>`.
    - Variable `DOKPLOY_URL`: `<dokploy-url>`.
 
 ### A3. DNS: `bao.kthais.com`
