@@ -84,8 +84,13 @@ Each holder, in turn (BusyBox `read -s` works):
 
 ```sh
 read -rs K
-bao write sys/generate-root/update nonce=<nonce> key="$K"; unset K
+printf '%s' "$K" | bao write sys/generate-root/update nonce=<nonce> key=-; unset K
 ```
+
+`key=-` makes `bao` read the key from stdin, and `printf` is a shell builtin, so the key never appears in
+a process's arguments (`ps`, `/proc/<pid>/cmdline`), where anyone able to list processes on the host
+could see it. On 2026-10-01 we passed it as `key="$K"`; the stdin form is the standard `bao write`
+syntax but hasn't been run here yet, so check that the first holder's call returns `progress 1`.
 
 After the first: `progress 1`, `complete false`. After the second: `complete true` and an
 `encoded_token`.
@@ -128,8 +133,14 @@ unset BAO_TOKEN
 exit
 ```
 
-Run a `terraform/dokploy` apply (any merge that touches `terraform/`, or rerun the last `tofu` run) to
-remove the 8210 listener. Until then it's reachable only from inside the container.
+Run a `terraform/dokploy` apply to remove the 8210 listener: merge any PR that touches `terraform/`, or
+rerun a `tofu` run that was started by a **push** to `main`. Scheduled and manually dispatched runs only
+run `openbao-apply`, so rerunning one of those leaves the listener in place. Until it's removed it's
+reachable only from inside the container. Check it's gone, in the container:
+
+```sh
+wget -qO- http://127.0.0.1:8210/v1/sys/health || echo "8210 closed"   # must print "8210 closed"
+```
 
 ## CI's login: the `sub` it must be bound to
 
