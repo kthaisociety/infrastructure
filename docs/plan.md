@@ -4,7 +4,8 @@ _Written 2026-09-29. Revised 2026-09-30: Dokploy managed with OpenTofu, state an
 GCP dependency for the foundation. Revised again 2026-09-30: lessons from the DD2482 prototype, OpenBao's
 deployment and bootstrap order settled, app delivery through this repo, OpenBao's API public with no
 personal logins for now, and phases reordered so OpenBao comes first. Revised 2026-10-01: people log in
-to OpenBao with Google and the UI is on; projects are folders read by shared modules. Status
+to OpenBao with Google and the UI is on; projects are folders read by shared modules; existing projects
+are rebuilt as new OpenTofu-built ones and their data migrated, not imported. Status
 (2026-10-01): `terraform/glesys` applied; OpenBao deployed by `terraform/dokploy`, initialized by hand and
 public at `bao.kthais.com` (runbook Parts A–C done). Next: Part D._
 
@@ -423,7 +424,7 @@ wired up by the same apply.
   `project.yaml`. Variants (a static site, a compose stack, a worker) become their own types as they come
   up. A project that fits no type gets its own module in `terraform/dokploy/projects/<project>/` and one
   line in `projects.tf`; it still uses `modules/app-secrets`, so its OpenBao side is the same.
-- **UI-managed projects** (before Phase 7) have `managed: false` and their Dokploy project and environment
+- **UI-managed projects** (only if one has to use OpenBao before it's rebuilt) have `managed: false` and their Dokploy project and environment
   IDs in `project.yaml`. Only `app-secrets` and the vault provider apply to them; the services stay in the
   UI. Not through the `dokploy_project` data source, which would copy shared env vars into state.
 - **A new project's first deploy waits for its secrets.** The PR plan can't see the new token (OpenBao
@@ -432,6 +433,28 @@ wired up by the same apply.
 - **Domains need DNS and a route.** `domain:` makes a `dokploy_domain` (the Traefik route and its
   certificate). The DNS record is still a PR in `dnscontrol`, the only place DNS is managed. Without the
   record Let's Encrypt can't validate; without the route Traefik answers 404 on its default certificate.
+
+### Existing projects are rebuilt, not imported
+_Decided 2026-10-01._ An existing project moves to OpenTofu as a **new** Dokploy project built by
+`modules/app`, next to the old one, with its data copied over; it isn't adopted with `import` blocks.
+onboarding-service goes first.
+
+- **Why:** the result is exactly what the code says, with no import-time drift to reconcile and no UI
+  leftovers (old env vars, mounts, webhooks). The old project stays, stopped, as the rollback until the
+  new one has run for a week.
+- **Two copies at once is safe for onboarding-service:** it has no background jobs; it only acts when
+  landingpage-backend or the frontend calls it, so an idle copy does nothing.
+- **The cutover is a URL or a route, not DNS.** Callers that reach a service through an env URL
+  (`ONBOARDING_SERVICE_URL` in landingpage-backend and the frontend) switch by changing that URL, so the
+  new service is tested on its own hostname or internal name first. A service people reach at a public
+  domain is tested on a temporary hostname (DNS record plus `dokploy_domain`), then the domain moves:
+  remove it from the old app in the UI, apply it on the new one. Both are on the same host, so DNS
+  doesn't change, and Traefik reuses the certificate it already has for that name.
+- **Data:** stop the old app, copy its data (a SQLite file, a `pg_dump`), start the new one, switch the
+  callers. Minutes of downtime, at a quiet time.
+- **Costs:** a short write freeze per project, and anything kept outside env (volumes, file mounts,
+  schedules, backups) has to be found and recreated. Import stays the fallback for a project whose data
+  can't be copied easily.
 
 ### Dokploy's Traefik is kept current by hand
 _2026-10-01._ Dokploy doesn't upgrade an existing Traefik container when Dokploy itself is upgraded. Ours
@@ -577,7 +600,8 @@ So `terraform/dokploy` is applied in two passes the first time:
 3. By hand, inside the container: `bao operator init`, then with the root token: JWT auth for this
    repo's CI, the first infra admin logins, then revoke the root token.
 4. `dokploy` again, turning on the public route, and test its blocks.
-5. `openbao`: KV mount, token role, policies, tokens, audit device, `infrastructure/production`.
+5. `openbao`: KV mount, token role, policies, tokens, `infrastructure/production`. (The audit device is
+   in OpenBao's server config, step 2.)
 6. `dokploy` again, adding the vault providers and the `openbao-snapshots` compose.
 
 **Why no public route until after init:** whoever calls `sys/init` on a fresh OpenBao owns it. Traefik
@@ -671,7 +695,7 @@ public:
 ### Phase 4 — Configure OpenBao as code
 Exact steps: [openbao-deploy.md](openbao-deploy.md), Part D.
 
-1. Write `terraform/openbao/`: KV v2 at `secret`, the file audit device, the `dokploy-provider` token
+1. Write `terraform/openbao/`: KV v2 at `secret` (the file audit device is in the server config), the `dokploy-provider` token
    role, the `infra-admin` policy, Google OIDC with the `infra-admin` role, and `modules/app-secrets`
    for every `project.yaml`. Plus `infrastructure/production`: the GleSYS snapshot credential and the
    snapshot token. Import what Phase 3 made (the JWT mount, config and role, the `terraform` policy, the
@@ -714,26 +738,26 @@ service completely, or not at all": a provider is its own resource, not part of 
 2. Apply, and confirm the next plan is empty.
 
 ### Phase 7 — Projects into OpenTofu, one at a time
-Projects are imported as they run today, on Dokploy's GitHub App source. Moving to CI-built images is
-Phase 8, so each migration only changes one thing: who owns the config.
+Projects are rebuilt next to the running ones and their data copied over (see
+[Existing projects are rebuilt](#existing-projects-are-rebuilt-not-imported)), still on Dokploy's
+GitHub App source. Moving to CI-built images is Phase 8.
 
 The first project is **onboarding-service**: one Go app built from its Dockerfile, SQLite on a volume,
-no database service. Its env already holds references from Phase 5. Its module is a
-`dokploy_project`, a `dokploy_application` from the GitHub App, a `dokploy_mount` volume on `/data`, its
-domain, and a `dokploy_volume_backup` of `/data`. The Google service account JSON moves from a file
+no database service. It skips Phase 5's UI step: its new project gets references from the start. Its
+module is a `dokploy_project`, a `dokploy_application` from the GitHub App, a `dokploy_mount` volume on
+`/data`, and a `dokploy_volume_backup` of `/data`; no public domain, since its callers reach it through
+`ONBOARDING_SERVICE_URL`. The Google service account JSON moves from a file
 mount to an env reference (base64 in `GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON`), because a file mount's
 content would end up in state.
 
 For each project:
-1. If it isn't there yet, add its folder with `managed: false` and apply, so its policy, token and
-   vault provider exist. An infra admin writes its secrets to `<project>/<environment>`.
-2. Fill in its `project.yaml` (type, domain, env, secret names) and set `managed: true`; a project that
-   fits no type gets a module in `terraform/dokploy/projects/<project>/`. Generate `import` blocks with
-   the provider's `dogfood/generate_imports.py` (read-only) so existing services are adopted, not
-   recreated. Database passwords use `database_password_wo`.
-3. Plan until the only diffs are the intended ones (secrets → references, plus the expected
-   `deploy_on_change`/`deployment_timeout` diff after import). Apply; the service redeploys.
-4. Tell the project's maintainers that config changes now go through PRs here.
+1. Add its folder with `deploy: false` and merge: `terraform/openbao` makes its policy, token and empty
+   path; `terraform/dokploy` makes the new project, its vault provider and the services, not deployed.
+   A project that fits no type gets a module in `terraform/dokploy/projects/<project>/`.
+2. An infra admin writes its secrets to `<project>/<environment>` in the UI.
+3. Set `deploy: true` and merge. Test the new copy on its own hostname or internal name.
+4. Cut over: stop the old app, copy its data, start the new one, point callers (or the domain) at it.
+5. Tell the project's maintainers that config changes now go through PRs here.
 
 ### Phase 8 — Deploys through this repo
 1. Create the deploy GitHub App (org-owned, installed on this repo only, `actions: write`). Its ID and

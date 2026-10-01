@@ -263,7 +263,8 @@ The `infra-admin` policy doesn't exist yet; Part D creates it. Until then these 
 anything.
 
 ### B4. Nothing else by hand
-Mounts, the audit device, policies and tokens all come from `terraform/openbao`. Don't create them here.
+Mounts, policies and tokens all come from `terraform/openbao`, and the audit device from the server
+config in `terraform/dokploy`. Don't create them here.
 
 ### B5. Revoke the root token and check auto-unseal
 _(in the container)_
@@ -367,27 +368,26 @@ change `bao-blocked` to an allowlist before retrying.
 
 ## Part D: Configure OpenBao as code
 
-### D1. The first two project folders
+### D1. The first project folder
 Each project is a folder, `terraform/projects/<project>/project.yaml` (plan, "Projects are folders").
-The first two are still managed in the Dokploy UI, so they're `managed: false` with their Dokploy IDs,
-written here directly: the `dokploy_project` and `dokploy_environment` data sources would copy each
-project's shared env vars into state.
+The first is **onboarding-service**. It moves to a new Dokploy project built by OpenTofu rather than
+being wired into the UI-managed one (plan, "Existing projects are rebuilt, not imported"), so its folder
+has no Dokploy IDs. For now `terraform/openbao` reads only `environments.<env>.shared`; `secrets` lists
+the names an admin fills in, for `modules/app` later.
 
 ```yaml
 # terraform/projects/onboarding-service/project.yaml
 name: onboarding-service
 repo: kthaisociety/onboarding-service
-managed: false
 environments:
   production:
-    dokploy_project_id: "<id>"
-    dokploy_environment_id: "<id>"
+    secrets: [MATTERMOST_BOT_TOKEN, GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON]
     shared: [onboarding-service-secret]
 ```
 
-`landingpage-backend` is the same shape. The IDs are in the Dokploy URL when a project or environment is
-open. The `infrastructure` project isn't a folder: `terraform/dokploy` creates it, and its
-`infrastructure/production` path is written by OpenTofu (snapshots, E2).
+`landingpage-backend` comes later, the same way. Until then it keeps its plain
+`ONBOARDING_SERVICE_SECRET`. The `infrastructure` project isn't a folder: `terraform/dokploy` creates
+it, and its `infrastructure/production` path is written by OpenTofu (`snapshots.tf`).
 
 ### D2. The PR: `terraform/openbao`
 **`versions.tf`**
@@ -412,8 +412,9 @@ open. The `infrastructure` project isn't a folder: `terraform/dokploy` creates i
   `infrastructure-ci`, `vault_policy` `terraform`, `vault_auth_backend` `userpass`. Their config in code
   must match B2/B3 exactly, so the first plan shows no change to them.
 - `vault_mount` `secret`, KV v2.
-- `vault_audit` type `file`, `file_path = "stdout"`: audit lines go to the container's log, which
-  Dokploy shows.
+- No `vault_audit`: since 2.3.2 OpenBao refuses to create audit devices through the API (CVE-2025-54997).
+  The `file` device to `stdout` is in the server config in `terraform/dokploy/openbao.tf` instead, so
+  audit lines go to the container's log, which Dokploy shows.
 - `vault_token_auth_backend_role` `dokploy-provider`: `orphan = true`, `renewable = true`,
   `token_period = 768h`, `token_no_default_policy = true`, `allowed_policies_glob = ["dokploy-project-*"]`.
 - `vault_policy` `infra-admin`:
@@ -487,8 +488,9 @@ resource "vault_jwt_auth_backend_role" "infra_admin" {
 `openbao_oidc_client_secret` (sensitive), and `openbao_admin_emails`, defaulting to sam@, vilhelm@,
 pavlos.spanoudakis@ and max.astrand@kthais.com.
 
-**`terraform/dokploy/openbao.tf`**: `ui = true`, in this same PR. `openbao-apply` runs before
-`dokploy-apply` (below), so the login page only exists once the Google login does. The public route already passes `/ui` and `/v1/auth/oidc`.
+**`terraform/dokploy/openbao.tf`**: `ui = true` and the audit device, in this same PR. `openbao-apply`
+runs before `dokploy-apply` (below), so the login page only exists once the Google login does. The
+public route already passes `/ui` and `/v1/auth/oidc`.
 
 **`tofu.yml`**: an `openbao-apply` job on `main`, `environment: production`,
 `needs: glesys-apply`, with `dokploy-apply` now needing `openbao-apply`: the steady-state order
@@ -520,7 +522,7 @@ The `openbao-apply` job succeeds and its plan showed no changes to the imported 
 
 **Google sign-in**, in a browser: `https://bao.kthais.com/ui`, method OIDC, role `infra-admin`, sign in
 with a listed kthais.com account. The UI shows `secret/` with an empty `onboarding-service/production`
-and `landingpage-backend/production`. `secret/infrastructure/` is denied. A kthais.com account not on the
+and `shared/onboarding-service-secret/production`. `secret/infrastructure/` is denied. A kthais.com account not on the
 list gets `claim "email" does not match`. From a laptop, `BAO_ADDR=https://bao.kthais.com bao login
 -method=oidc role=infra-admin` works too.
 

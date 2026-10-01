@@ -1,8 +1,7 @@
 name: tofu
 
 # One workflow for every root module, so applies run in dependency order:
-# glesys → openbao → dokploy. terraform/openbao doesn't exist yet, and on the very first build dokploy
-# runs before it (docs/plan.md, "Bootstrap order").
+# glesys → openbao → dokploy (docs/plan.md, "Bootstrap order", for how the very first build differed).
 
 on:
   pull_request:
@@ -14,6 +13,11 @@ on:
     paths:
       - "terraform/**"
       - ".github/workflows/tofu.yml"
+  # Renews OpenBao's periodic tokens (Dokploy providers, snapshots) even when nothing changes. Unrenewed,
+  # they expire 32 days after the last apply.
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -142,7 +146,7 @@ jobs:
 
   dokploy-apply:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: glesys-apply
+    needs: openbao-apply
     runs-on: ubuntu-latest
     environment: production
     defaults:
@@ -160,5 +164,60 @@ jobs:
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
+      - run: tofu init
+      - run: tofu apply -auto-approve
+
+  openbao-validate:
+    # No plan on PRs: CI's OpenBao login is bound to `production`, which only runs on main, and even a
+    # read-only login would read every secret while refreshing state. The apply prints its plan first.
+    if: github.event_name == 'pull_request'
+    needs: fmt
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform/openbao
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+      - run: tofu init -backend=false
+      - run: tofu validate
+
+  openbao-apply:
+    # On a push to main after glesys-apply, and alone on the weekly schedule or a manual run (glesys-apply
+    # is skipped then, which doesn't block this one; a failed one does).
+    if: >-
+      !cancelled() && !contains(needs.*.result, 'failure') && github.ref == 'refs/heads/main' &&
+      contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name)
+    needs: glesys-apply
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # the GitHub OIDC token CI logs in to OpenBao with
+    defaults:
+      run:
+        working-directory: terraform/openbao
+    env:
+      # Backend, and terraform/glesys's state: the tfstate instance's CI credential.
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      TF_VAR_state_passphrase: ${{ secrets.TF_VAR_state_passphrase }}
+      TF_VAR_openbao_oidc_client_id: ${{ secrets.OPENBAO_OIDC_CLIENT_ID }}
+      TF_VAR_openbao_oidc_client_secret: ${{ secrets.OPENBAO_OIDC_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+      - name: GitHub OIDC token for OpenBao
+        run: |
+          JWT=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://bao.kthais.com" | jq -r .value)
+          echo "::add-mask::$JWT"
+          echo "TF_VAR_openbao_jwt=$JWT" >> "$GITHUB_ENV"
       - run: tofu init
       - run: tofu apply -auto-approve
