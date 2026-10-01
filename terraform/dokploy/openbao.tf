@@ -12,7 +12,8 @@ locals {
   openbao_host  = "bao.kthais.com"
 
   openbao_config = {
-    ui            = false
+    # The UI's only login is Google (terraform/openbao/oidc.tf).
+    ui            = true
     disable_mlock = true
     api_addr      = "https://${local.openbao_host}"
     # Single node: nothing dials this, but Raft requires it.
@@ -40,6 +41,16 @@ locals {
         current_key    = "file:///openbao/unseal.key"
       }
     }
+    # Every request and response, HMAC'd, to the container's log, which Dokploy shows. Here and not in
+    # terraform/openbao: OpenBao refuses to create audit devices through the API (since 2.3.2).
+    audit = [{
+      file = {
+        stdout = {
+          description = "Audit log to the container's stdout."
+          options     = { file_path = "stdout" }
+        }
+      }
+    }]
   }
 
   # Only CI's login is public. Userpass (infra admins) and the root-recovery and init endpoints get a
@@ -90,7 +101,7 @@ locals {
 
 resource "dokploy_compose" "openbao" {
   name            = "openbao"
-  description     = "Secrets manager. API only, at https://bao.kthais.com"
+  description     = "Secrets manager, at https://bao.kthais.com"
   environment_id  = dokploy_project.infrastructure.production_environment_id
   compose_type    = "docker-compose"
   app_name_prefix = "openbao"
