@@ -7,7 +7,7 @@ personal logins for now, and phases reordered so OpenBao comes first. Revised 20
 to OpenBao with Google and the UI is on; projects are folders read by shared modules; existing projects
 are rebuilt as new OpenTofu-built ones and their data migrated, not imported. Status
 (2026-10-01): `terraform/glesys` applied; OpenBao deployed by `terraform/dokploy`, initialized by hand and
-public at `bao.kthais.com` (runbook Parts A–C done). Next: Part D._
+public at `bao.kthais.com`; `terraform/openbao` applied with Google sign-in and the UI on (runbook Parts A–D done). Next: Part E._
 
 **Next milestone:** OpenBao defined in this repo, running on the VPS, and serving secrets to one or two
 apps (Phases 2–5). Everything after that is ordered but not scheduled.
@@ -208,7 +208,9 @@ the image's `BAO_LOCAL_CONFIG` env var. The image's entrypoint writes it to its 
 _Decided 2026-09-30._ After the first deploy, an operator runs `bao operator init` inside the container. It returns
 recovery keys (3 shares, threshold 2: Sam, Vilhelm and the org break-glass vault, each in 1Password; done
 2026-10-01) and a root token. The root token sets up the
-GitHub Actions JWT auth for this repo and the first infra admin logins (Phase 3), and is then revoked.
+GitHub Actions JWT auth for this repo and the first infra admin logins (Phase 3), and is then revoked,
+only after CI has logged in with it. Getting a root token back later takes two recovery keys and a
+temporary config change ([openbao-recovery.md](openbao-recovery.md)).
 
 - **Why:** initialization happens once in the life of the data. A rebuilt host restores a snapshot and
   isn't initialized again, so automating it saves nothing later. Manual init gives us recovery keys
@@ -485,8 +487,9 @@ Hardening, all in the Traefik labels and OpenBao config in `openbao.tf`:
 - **Only the GitHub (CI) and Google (people) login paths are public.** Traefik blocks `/v1/auth/userpass/`
   (the break-glass login, below) and the
   root-recovery endpoints `/v1/sys/generate-root`, `/v1/sys/rekey`, `/v1/sys/rotate/recovery` and
-  `/v1/sys/init`. `generate-root` accepts calls with no token; guessing the recovery keys is
-  infeasible, but there's no reason to offer it. Blocked means Traefik answers 403 (an `ipAllowList`
+  `/v1/sys/init`. On 2.7 the no-token `generate-root` endpoints are already off by default
+  (since 2.5.3), so this block is a second layer; turning them back on for a recovery is done on a
+  loopback-only listener ([openbao-recovery.md](openbao-recovery.md)). Blocked means Traefik answers 403 (an `ipAllowList`
   middleware that allows nothing). All of these still work from inside the container.
 - **`userpass` tokens only work from inside the container.** Every `userpass` user has
   `token_bound_cidrs = 127.0.0.1/32`, and only `docker exec` reaches OpenBao from `127.0.0.1`; a request
