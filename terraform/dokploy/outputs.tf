@@ -1,4 +1,4 @@
-# Read by terraform/openbao through terraform_remote_state, for the infrastructure project's vault provider.
+# The infrastructure project's ids, for reference.
 
 output "infrastructure" {
   value = {

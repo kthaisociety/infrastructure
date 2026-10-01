@@ -12,7 +12,7 @@ locals {
       for env, env_cfg in cfg.environments : "${p}/${env}" => {
         project     = p
         environment = env
-        shared      = try(env_cfg.shared, [])
+        shared      = keys(try(env_cfg.shared, {}))
       }
     }
   ]...)

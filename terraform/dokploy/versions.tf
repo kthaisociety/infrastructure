@@ -41,6 +41,12 @@ terraform {
       method   = method.aes_gcm.state
       enforced = true
     }
+    # terraform/openbao's state, read for the vault provider tokens (projects.tf). Same passphrase.
+    remote_state_data_sources {
+      default {
+        method = method.aes_gcm.state
+      }
+    }
   }
 }
 
