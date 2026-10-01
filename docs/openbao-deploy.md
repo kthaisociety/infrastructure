@@ -36,10 +36,13 @@ and only then make it public. After init, `sys/init` does nothing.
 `ssh <you>@176.126.70.246`:
 
 ```sh
-BAO=$(docker ps -q --filter label=com.docker.compose.service=openbao)
+BAO=$(sudo docker ps -q --filter label=com.docker.compose.service=openbao)
 echo "$BAO"        # exactly one container id; stop if it's empty or more than one
-docker exec -it -e BAO_ADDR=http://127.0.0.1:8200 "$BAO" sh
+sudo docker exec -it -e BAO_ADDR=http://127.0.0.1:8200 "$BAO" sh
 ```
+
+Docker on the host needs `sudo`. Dokploy's own terminal also works, but it opens `bash` by default and
+the image only has `sh`: pick `sh`.
 
 Commands marked _(in the container)_ run in that shell. `ash` there keeps no history file, so values
 typed or pasted don't persist.
@@ -84,8 +87,8 @@ Generated on the host, so it's only ever there and in 1Password.
 ssh <you>@176.126.70.246
 sudo install -d -m 0755 /etc/openbao
 sudo sh -c 'umask 077; openssl rand -out /etc/openbao/unseal.key 32'
-docker run --rm --entrypoint id openbao/openbao:2.7.0 openbao   # note the uid and gid
-sudo chown <uid>:<gid> /etc/openbao/unseal.key
+sudo docker run --rm --entrypoint id openbao/openbao:2.7.0 openbao   # uid=100 gid=1000 in 2.7.0
+sudo chown 100:1000 /etc/openbao/unseal.key
 sudo chmod 0400 /etc/openbao/unseal.key
 sudo base64 /etc/openbao/unseal.key                              # copy into 1Password
 ```
@@ -163,11 +166,11 @@ secret. On `main`, runs only after `glesys-apply`.
 Merge. CI applies and Dokploy deploys the compose. Then on the host:
 
 ```sh
-BAO=$(docker ps -q --filter label=com.docker.compose.service=openbao)
-echo "$BAO"                                                     # exactly one container id
-docker logs "$BAO" 2>&1 | tail -20                              # no errors about the seal or storage
-docker exec "$BAO" env BAO_ADDR=http://127.0.0.1:8200 bao status
-docker inspect "$BAO" --format '{{range $n, $_ := .NetworkSettings.Networks}}{{println $n}}{{end}}'
+BAO=$(sudo docker ps -q --filter label=com.docker.compose.service=openbao)
+echo "$BAO"                                                          # exactly one container id
+sudo docker logs "$BAO" 2>&1 | tail -20                         # no errors about the seal or storage
+sudo docker exec "$BAO" env BAO_ADDR=http://127.0.0.1:8200 bao status
+sudo docker inspect "$BAO" --format '{{range $n, $_ := .NetworkSettings.Networks}}{{println $n}}{{end}}'
 ```
 
 Expect `Seal Type static`, `Initialized false`, and one network, `openbao-…_default`: **not**
@@ -184,18 +187,24 @@ Do this right after A6, in one sitting, with the recovery key holders reachable.
 _(in the container)_
 
 ```sh
-bao operator init -recovery-shares=2 -recovery-threshold=1
+bao operator init -recovery-shares=3 -recovery-threshold=2
 ```
 
-It prints 2 recovery keys and a root token.
-- Key holders: Sam (`sammosios`) and Vilhelm (`vilhelmprytz`). Each recovery key goes to 1Password as its
-  own item ("OpenBao recovery key 1/2", "2/2"), each shared with only its holder. Either one alone can
-  generate a new root token in an emergency.
-- Why a threshold of 1: both holders are org admins who can already reach CI's `terraform` policy
-  (`sudo` on everything) by pushing to `main`, so requiring both adds little; what matters is that
-  losing one holder doesn't lose recovery. When a third holder joins, rekey to 3 shares, threshold 2,
-  from inside the container: `bao operator rekey -target=recovery -init -key-shares=3 -key-threshold=2`,
-  then `bao operator rekey -target=recovery` with one current key, and hand out the new keys.
+_Done 2026-10-01._ It prints 3 recovery keys and a root token. Each recovery key goes to 1Password as its
+own item, shared with only its holder:
+
+| Item | Holder |
+|---|---|
+| "OpenBao recovery key 1/3" | Sam (`sammosios`) |
+| "OpenBao recovery key 2/3" | Vilhelm (`vilhelmprytz`) |
+| "OpenBao recovery key 3/3" | the org-owned break-glass vault |
+
+- Any two can generate a new root token in an emergency. OpenBao refuses a threshold of 1 with more than
+  one share, so "either holder alone" isn't possible; the org vault's key keeps recovery possible when one
+  person is gone, without either holder being able to do it alone.
+- To change holders later, from inside the container: `bao operator rekey -target=recovery -init
+  -key-shares=<n> -key-threshold=<t>`, then `bao operator rekey -target=recovery` with two current keys,
+  and hand out the new keys.
 - The root token stays in this shell only. Never store it: it's revoked in B5.
 
 ```sh
@@ -266,10 +275,10 @@ exit
 On the host:
 
 ```sh
-BAO=$(docker ps -q --filter label=com.docker.compose.service=openbao)
-docker restart "$BAO"
+BAO=$(sudo docker ps -q --filter label=com.docker.compose.service=openbao)
+sudo docker restart "$BAO"
 sleep 5
-docker exec "$BAO" env BAO_ADDR=http://127.0.0.1:8200 bao status   # Sealed false
+sudo docker exec "$BAO" env BAO_ADDR=http://127.0.0.1:8200 bao status   # Sealed false
 ```
 
 ---
@@ -280,6 +289,10 @@ docker exec "$BAO" env BAO_ADDR=http://127.0.0.1:8200 bao status   # Sealed fals
 In `terraform/dokploy/variables.tf`, set the defaults of `openbao_initialized` and `openbao_public` to
 `true`. Merge; CI applies and Dokploy redeploys the compose on `dokploy-network` with the Traefik labels. The first request
 may take a minute while Traefik gets the certificate.
+
+**On a fresh host** (disaster recovery, or anything that starts with an empty data volume), the defaults
+are now wrong: apply with `-var openbao_initialized=false -var openbao_public=false` first, and only drop
+those once OpenBao is initialized or restored. See plan, "Disaster recovery".
 
 ### C2. Check the route and every block
 From a laptop:
@@ -480,19 +493,19 @@ Once, now, on the host, with a throwaway OpenBao that's never on a network:
 
 ```sh
 # download the newest snapshot from the bucket to /tmp/restore-test.snap (rclone or any S3 client)
-BAO=$(docker ps -q --filter label=com.docker.compose.service=openbao)
-docker run -d --name bao-restore-test --network none \
+BAO=$(sudo docker ps -q --filter label=com.docker.compose.service=openbao)
+sudo docker run -d --name bao-restore-test --network none \
   -v /etc/openbao/unseal.key:/openbao/unseal.key:ro \
-  -e BAO_LOCAL_CONFIG="$(docker inspect "$BAO" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^BAO_LOCAL_CONFIG=//p')" \
+  -e BAO_LOCAL_CONFIG="$(sudo docker inspect "$BAO" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^BAO_LOCAL_CONFIG=//p')" \
   openbao/openbao:2.7.0 server
-docker cp /tmp/restore-test.snap bao-restore-test:/tmp/
-docker exec -it -e BAO_ADDR=http://127.0.0.1:8200 bao-restore-test sh
+sudo docker cp /tmp/restore-test.snap bao-restore-test:/tmp/
+sudo docker exec -it -e BAO_ADDR=http://127.0.0.1:8200 bao-restore-test sh
 ```
 
 _(in the test container)_: `bao operator init -recovery-shares=1 -recovery-threshold=1`, log in with the
 throwaway root token, `bao operator raft snapshot restore -force /tmp/restore-test.snap`,
 `bao status` (Sealed false), then `bao login -method=userpass username=<name>` with your real password
-and `bao kv list secret/`: the real data is there. Then `docker rm -f bao-restore-test` and delete
+and `bao kv list secret/`: the real data is there. Then `sudo docker rm -f bao-restore-test` and delete
 `/tmp/restore-test.snap`.
 
 ### E4. The first two apps
