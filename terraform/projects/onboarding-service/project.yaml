@@ -1,5 +1,5 @@
 # Read by terraform/openbao now (its policy, provider token and secret path), and by terraform/dokploy
-# once modules/app exists (the new Dokploy project, its vault provider and the app).
+# once modules/project exists (the new Dokploy project, its vault provider and the app).
 name: onboarding-service
 repo: kthaisociety/onboarding-service
 environments:

@@ -413,22 +413,22 @@ wired up by the same apply.
 
 - **Two shared modules, one per root**, because the wiring spans both and they must stay separate
   (`terraform/dokploy` plans on PRs; `terraform/openbao` can't).
-  - `modules/app-secrets` (in `terraform/openbao`), per environment: the `dokploy-project-<project>-<env>`
+  - `modules/project-secrets` (in `terraform/openbao`), per environment: the `dokploy-project-<project>-<env>`
     policy, its token, and an empty `secret/<project>/<env>` entry (metadata only, no data) so the path
     is there in the UI to fill.
-  - `modules/app` (in `terraform/dokploy`), per environment: the Dokploy project and environment, the
+  - `modules/project` (in `terraform/dokploy`), per environment: the Dokploy project and environment, the
     vault provider `<project>-<env>` with that token, and the services. Env is the plain `env` values
     plus one generated reference per secret name, so nobody hand-writes
     `${{vault.<provider>.<path>:<KEY>}}`, and no secret value is in git or state.
-- **App types.** The default `type: app` is an application plus Postgres and Redis, each optional in
+- **Project types.** The default `type: app` is an application plus Postgres and Redis, each optional in
   `project.yaml`. Variants (a static site, a compose stack, a worker) become their own types as they come
   up. A project that fits no type gets its own module in `terraform/dokploy/projects/<project>/` and one
-  line in `projects.tf`; it still uses `modules/app-secrets`, so its OpenBao side is the same.
+  line in `projects.tf`; it still uses `modules/project-secrets`, so its OpenBao side is the same.
 - **UI-managed projects** (only if one has to use OpenBao before it's rebuilt) have `managed: false` and their Dokploy project and environment
-  IDs in `project.yaml`. Only `app-secrets` and the vault provider apply to them; the services stay in the
+  IDs in `project.yaml`. Only `project-secrets` and the vault provider apply to them; the services stay in the
   UI. Not through the `dokploy_project` data source, which would copy shared env vars into state.
 - **A new project's first deploy waits for its secrets.** The PR plan can't see the new token (OpenBao
-  applies only on `main`), so `modules/app` reads it with `try()`; on `main`, `openbao` applies first. A
+  applies only on `main`), so `modules/project` reads it with `try()`; on `main`, `openbao` applies first. A
   new project starts with `deploy: false` until an admin has filled its path (verify item 11).
 - **Domains need DNS and a route.** `domain:` makes a `dokploy_domain` (the Traefik route and its
   certificate). The DNS record is still a PR in `dnscontrol`, the only place DNS is managed. Without the
@@ -436,7 +436,7 @@ wired up by the same apply.
 
 ### Existing projects are rebuilt, not imported
 _Decided 2026-10-01._ An existing project moves to OpenTofu as a **new** Dokploy project built by
-`modules/app`, next to the old one, with its data copied over; it isn't adopted with `import` blocks.
+`modules/project`, next to the old one, with its data copied over; it isn't adopted with `import` blocks.
 onboarding-service goes first.
 
 - **Why:** the result is exactly what the code says, with no import-time drift to reconcile and no UI
@@ -623,12 +623,12 @@ infrastructure/                       # github.com/kthaisociety/infrastructure (
     dokploy/      # one root module for everything on Dokploy                         — CI                [todo]
       core.tf     #   GHCR registry, GitHub App lookup, backup destination, notifications
       openbao.tf  #   OpenBao compose (config and Traefik route inline) and the openbao-snapshots compose
-      projects.tf #   modules/app for every project.yaml (vault provider, services); custom modules by name
-      projects/<project>/  # only for projects that fit no app type
+      projects.tf #   modules/project for every project.yaml (vault provider, services); custom modules by name
+      projects/<project>/  # only for projects that fit no project type
     openbao/      # KV v2, JWT auth for CI, Google OIDC and userpass for people, token role, policies — CI [todo]
     modules/
-      app-secrets/ # OpenBao side of a project: policy, token, empty KV path                      [todo]
-      app/        # Dokploy side of a project, one per app type (default: app + Postgres + Redis) [todo]
+      project-secrets/ # OpenBao side of a project: policy, token, empty KV path                      [todo]
+      project/    # Dokploy side of a project, one per project type (default: app + Postgres + Redis) [todo]
     gcp/          # GCP projects, OAuth clients, etc.                                               [later]
   docs/
     openbao-deploy.md  # exact steps from no OpenBao to two apps using it (Phases 2–5)           [written]
@@ -696,7 +696,7 @@ public:
 Exact steps: [openbao-deploy.md](openbao-deploy.md), Part D.
 
 1. Write `terraform/openbao/`: KV v2 at `secret` (the file audit device is in the server config), the `dokploy-provider` token
-   role, the `infra-admin` policy, Google OIDC with the `infra-admin` role, and `modules/app-secrets`
+   role, the `infra-admin` policy, Google OIDC with the `infra-admin` role, and `modules/project-secrets`
    for every `project.yaml`. Plus `infrastructure/production`: the GleSYS snapshot credential and the
    snapshot token. Import what Phase 3 made (the JWT mount, config and role, the `terraform` policy, the
    `userpass` mount).
@@ -770,7 +770,7 @@ For each project:
 4. Then the rest, one project per PR. A project without CI stays on the GitHub App source until it has
    some.
 
-Add app types to `terraform/modules/app` as projects need them. Write
+Add project types to `terraform/modules/project` as projects need them. Write
 `docs/runbook.md` along the way: disaster recovery, token rotation, adding a secret path, adding a
 project, adding an infra admin, rolling back a deploy.
 
@@ -808,7 +808,7 @@ admins.
 
 - **Per-project owners** don't need the identity service: an `owners:` list of emails in a project's
   `project.yaml` becomes an OIDC role scoped to that project's KV paths, made by
-  `modules/app-secrets`. Every access change stays a reviewed PR here.
+  `modules/project-secrets`. Every access change stays a reviewed PR here.
 - **The [identity service](identity-service.md)**, once it exists and verifies Google sign-ins correctly
   (its Step 1), can replace Google as OpenBao's OIDC issuer, with the same roles. Decide then whether
   groups come from its tokens or stay as emails in `project.yaml`.

@@ -42,7 +42,7 @@ resource "vault_token" "openbao_snapshots" {
 
 # The infrastructure project's policy and provider token; its path is written below, not left empty.
 module "infrastructure_secrets" {
-  source = "../modules/app-secrets"
+  source = "../modules/project-secrets"
 
   project     = "infrastructure"
   environment = "production"

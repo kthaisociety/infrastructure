@@ -1,5 +1,5 @@
 # Every folder under terraform/projects/ with a project.yaml gets, per environment, a policy, a Dokploy
-# provider token and an empty secret path (modules/app-secrets). terraform/dokploy reads the tokens.
+# provider token and an empty secret path (modules/project-secrets). terraform/dokploy reads the tokens.
 
 locals {
   projects = {
@@ -23,8 +23,8 @@ locals {
   ]))
 }
 
-module "app_secrets" {
-  source   = "../modules/app-secrets"
+module "project_secrets" {
+  source   = "../modules/project-secrets"
   for_each = local.project_environments
 
   project     = each.value.project
@@ -34,7 +34,7 @@ module "app_secrets" {
   token_role  = vault_token_auth_backend_role.dokploy_provider.role_name
 }
 
-# Same as modules/app-secrets' empty path: metadata only, never deleted by OpenTofu.
+# Same as modules/project-secrets' empty path: metadata only, never deleted by OpenTofu.
 resource "vault_generic_endpoint" "shared_path" {
   for_each             = local.shared_paths
   path                 = "${vault_mount.secret.path}/metadata/${each.key}"

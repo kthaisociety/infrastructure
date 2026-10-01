@@ -373,7 +373,7 @@ Each project is a folder, `terraform/projects/<project>/project.yaml` (plan, "Pr
 The first is **onboarding-service**. It moves to a new Dokploy project built by OpenTofu rather than
 being wired into the UI-managed one (plan, "Existing projects are rebuilt, not imported"), so its folder
 has no Dokploy IDs. For now `terraform/openbao` reads only `environments.<env>.shared`; `secrets` lists
-the names an admin fills in, for `modules/app` later.
+the names an admin fills in, for `modules/project` later.
 
 ```yaml
 # terraform/projects/onboarding-service/project.yaml
@@ -438,8 +438,8 @@ it, and its `infrastructure/production` path is written by OpenTofu (`snapshots.
   path "auth/userpass/users/+/password" { capabilities = ["update"] }
   ```
 
-- **`projects.tf`**: `module "app_secrets"` with `for_each` over
-  `fileset(path.module, "../projects/*/project.yaml")`. **`terraform/modules/app-secrets`**, per
+- **`projects.tf`**: `module "project_secrets"` with `for_each` over
+  `fileset(path.module, "../projects/*/project.yaml")`. **`terraform/modules/project-secrets`**, per
   environment: `vault_policy` `dokploy-project-<project>-<env>` (read `secret/data/<project>/<env>`,
   read+list the matching `secret/metadata/` path, read `secret/data/shared/<name>/<env>` for each shared
   secret, read `auth/token/lookup-self`); a `vault_token` from the `dokploy-provider` role with that
@@ -552,8 +552,8 @@ That's verify item 8. If it succeeds, the token binding isn't doing its job: sto
 In `terraform/dokploy`:
 - A `terraform_remote_state` for `terraform/openbao` (with a `remote_state_data_sources` encryption
   entry), and the projects read with `fileset` and `yamldecode` as in `terraform/openbao`.
-- `projects.tf`: `module "app"` per `project.yaml`. For `managed: false` projects
-  (`terraform/modules/app` does only this), a `dokploy_vault_provider` per environment named
+- `projects.tf`: `module "project"` per `project.yaml`. For `managed: false` projects
+  (`terraform/modules/project` does only this), a `dokploy_vault_provider` per environment named
   `<project>-<env>`, assigned to the IDs from `project.yaml`:
 
   ```hcl
