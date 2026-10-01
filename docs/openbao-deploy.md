@@ -245,6 +245,14 @@ EOF
 Only a job in this repo's `production` environment gets a token GitHub signs with that `sub`, and
 `production` is limited to `main`.
 
+_2026-10-01:_ the repo turned out to use GitHub's **immutable subject**
+(`gh api repos/kthaisociety/infrastructure/actions/oidc/customization/sub`), so CI's real `sub` is
+`repo:kthaisociety@57193069/infrastructure@1397232852:environment:production`, and the first
+`openbao-apply` failed with `claim "sub" does not match`. `terraform/openbao` now binds that form. To
+switch over, the repo went back to name-only subjects for one apply, which logged in with the old
+binding and wrote the new one, then immutable subjects were turned back on. On a rebuild, write the
+role above with the immutable form directly.
+
 ### B3. The first infra admins
 _(in the container)_, once per admin. Today: `sam` and `vilhelm`.
 

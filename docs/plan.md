@@ -496,8 +496,9 @@ Hardening, all in the Traefik labels and OpenBao config in `openbao.tf`:
   without it, or with any other policy.
 - **Rate limiting** on the route (Traefik middleware), and OpenBao's file audit device on from the
   first apply of `terraform/openbao`.
-- **CI's JWT role is bound tightly:** to `repo:kthaisociety/infrastructure:environment:production`,
-  with a short TTL. Its policy is effectively admin (it writes policies), so the binding is what
+- **CI's JWT role is bound tightly:** to this repo's `production` environment, by
+  GitHub's immutable subject (`repo:kthaisociety@57193069/infrastructure@1397232852:environment:production`:
+  org and repo IDs, so a renamed or re-created repo can't match), with a short TTL. Its policy is effectively admin (it writes policies), so the binding is what
   protects it. PRs don't plan `terraform/openbao` (see Phase 4).
 
 ### People log in with Google; `userpass` is break-glass
