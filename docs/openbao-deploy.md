@@ -234,7 +234,7 @@ bao write auth/jwt/role/infrastructure-ci - <<'EOF'
   "role_type": "jwt",
   "user_claim": "sub",
   "bound_audiences": ["https://bao.kthais.com"],
-  "bound_claims": { "sub": "repo:kthaisociety/infrastructure:environment:production" },
+  "bound_claims": { "sub": "repo:kthaisociety@57193069/infrastructure@1397232852:environment:production" },
   "token_policies": ["terraform"],
   "token_ttl": "30m",
   "token_max_ttl": "1h"
@@ -244,6 +244,15 @@ EOF
 
 Only a job in this repo's `production` environment gets a token GitHub signs with that `sub`, and
 `production` is limited to `main`.
+
+_2026-10-01:_ the repo turned out to use GitHub's **immutable subject**
+(`gh api repos/kthaisociety/infrastructure/actions/oidc/customization/sub`), so CI's real `sub` is
+`repo:kthaisociety@57193069/infrastructure@1397232852:environment:production`, and the first
+`openbao-apply` failed with `claim "sub" does not match`: the role had been written with the name-only
+form. The command above now has the immutable form. To switch the live role, the repo went back to
+name-only subjects for one apply, which logged in with the old binding and wrote the new one, then
+immutable subjects were turned back on. Check the current form before writing the role:
+`gh api repos/kthaisociety/infrastructure/actions/oidc/customization/sub`.
 
 ### B3. The first infra admins
 _(in the container)_, once per admin. Today: `sam` and `vilhelm`.

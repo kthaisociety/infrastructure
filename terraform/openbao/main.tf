@@ -45,8 +45,10 @@ resource "vault_jwt_auth_backend_role" "infrastructure_ci" {
   role_type       = "jwt"
   user_claim      = "sub"
   bound_audiences = ["https://bao.kthais.com"]
-  # Only a job in this repo's `production` environment, which only runs on main.
-  bound_claims   = { sub = "repo:kthaisociety/infrastructure:environment:production" }
+  # Only a job in this repo's `production` environment, which only runs on main. The repo uses GitHub's
+  # immutable subject (org and repo IDs next to their names), so a renamed or re-created repo with the
+  # same name can't match. Made by hand in B2 with the name-only form, which this replaced.
+  bound_claims   = { sub = "repo:kthaisociety@57193069/infrastructure@1397232852:environment:production" }
   token_policies = ["terraform"]
   token_ttl      = 1800
   token_max_ttl  = 3600
