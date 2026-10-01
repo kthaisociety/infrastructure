@@ -30,7 +30,7 @@ and only then make it public. After init, `sys/init` does nothing.
 | CI's login | JWT auth at `auth/jwt`, role `infrastructure-ci`, audience `https://bao.kthais.com` |
 | CI's policy | `terraform` |
 | Admin policy | `infra-admin` |
-| Dokploy panel | `<dokploy-url>`: fill in |
+| Dokploy panel | `https://synapse.aisociety.se` (same host) |
 
 **Opening a shell inside the container**, used in Parts B, D and E. Run it on the host after
 `ssh <you>@176.126.70.246`:
@@ -49,8 +49,8 @@ typed or pasted don't persist.
 ## Part A: Deploy OpenBao privately
 
 ### A1. Check Dokploy's version
-In `<dokploy-url>`, the version is in the sidebar's footer. It must be **v0.30.7 or later** (the
-provider's target). We run v0.30.8.
+In `https://synapse.aisociety.se`, the version is in the sidebar's footer. It must be **v0.30.8 or
+later** (the provider's target). We run v0.30.8.
 
 ### A2. Dokploy API key for OpenTofu
 1. In Dokploy, create a user for OpenTofu (Settings → Users), role **admin**, email
@@ -61,7 +61,6 @@ provider's target). We run v0.30.8.
 4. GitHub, this repo → Settings → Secrets and variables → Actions:
    - Secret `DOKPLOY_API_KEY`: the key, in both the `plan` and `production` environments (never
      repo-level: any branch could read it). `gh secret set DOKPLOY_API_KEY --env <env>`.
-   - Variable `DOKPLOY_URL`: `<dokploy-url>`.
 
 ### A3. DNS: `bao.kthais.com`
 In the `dnscontrol` repo, `domains/kthais.com.js`, directly above `LE_CAA`:
@@ -94,17 +93,19 @@ it back on a new host: `base64 -d > /etc/openbao/unseal.key`, then the same `cho
 **Losing this key and the host together loses every secret.** Snapshots can't be restored without it.
 
 ### A5. The PR: `terraform/dokploy` with OpenBao
-New root module. Files and what's in them:
+_Written 2026-10-01 (in the same PR as this runbook)._ New root module. Files and what's in them:
 
 **`terraform/dokploy/versions.tf`**
-- `required_version = ">= 1.11"`, provider `vanillauys/dokploy` `~> 1.7`.
+- `required_version = ">= 1.11"`, provider `vanillauys/dokploy` `~> 1.8.0` (targets Dokploy v0.30.8).
 - The `s3` backend and `encryption` block copied from `terraform/glesys/versions.tf`, with
   `key = "dokploy/terraform.tfstate"`.
-- `provider "dokploy"` with `endpoint = var.dokploy_url` and `api_key = var.dokploy_api_key`
-  (sensitive, ephemeral).
+- `provider "dokploy"` with `endpoint = "https://synapse.aisociety.se"` (not secret). The key comes
+  from the `DOKPLOY_API_KEY` environment variable, like GleSYS's.
 
-**`terraform/dokploy/variables.tf`**: `state_passphrase`, `dokploy_url`, `dokploy_api_key`, and
-`openbao_public` (bool, default `false`).
+**`terraform/dokploy/variables.tf`**: `state_passphrase` and `openbao_public` (bool, default `false`).
+
+**`terraform/dokploy/outputs.tf`**: the infrastructure project's and production environment's IDs, for
+`projects.yaml` and `terraform/openbao`.
 
 **`terraform/dokploy/openbao.tf`**
 - `dokploy_project.infrastructure`.
@@ -147,8 +148,8 @@ New root module. Files and what's in them:
   - In `yamlencode` input, a literal `$` is `$$`; none of these labels need one.
 
 **`.github/workflows/tofu.yml`**: `dokploy-plan` (PRs, `plan` environment) and `dokploy-apply` (main, `production`
-environment, `needs: glesys-apply`), shaped like the `glesys` jobs, with `TF_VAR_dokploy_url` from the
-variable and `TF_VAR_dokploy_api_key` from the secret. On `main`, runs only after `glesys-apply`.
+environment, `needs: glesys-apply`), shaped like the `glesys` jobs, with `DOKPLOY_API_KEY` from the
+secret. On `main`, runs only after `glesys-apply`.
 
 ### A6. Merge and check
 Merge. CI applies and Dokploy deploys the compose. Then on the host:

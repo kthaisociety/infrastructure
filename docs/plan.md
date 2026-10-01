@@ -74,7 +74,7 @@ good enough:
   `import` blocks.
 
 Risks we accept: it's unofficial and maintained by one person. Mitigations: pin the minor version
-(`~> 1.7`), keep our Dokploy version at or above the one the provider targets, and fork it if it's
+(`~> 1.8.0`), keep our Dokploy version at or above the one the provider targets, and fork it if it's
 abandoned. This replaces the custom reconciler we had designed for deployments as code.
 
 ### What the Dokploy provider can't do
@@ -576,7 +576,7 @@ we extract it into `terraform/modules/` and have projects call it.
 ### Phase 2 — OpenBao on Dokploy
 Exact steps: [openbao-deploy.md](openbao-deploy.md), Parts A and C.
 
-1. Keep Dokploy at or above the provider's target (we run v0.30.8; the provider targets v0.30.7).
+1. Keep Dokploy at or above the provider's target (we run v0.30.8; provider 1.8.0 targets v0.30.8).
 2. Create the Dokploy `terraform` admin user and its API key (rate limiting off), into 1Password and
    GitHub.
 3. `bao.kthais.com` in the `dnscontrol` repo (`HOST_SYNAPSE("bao")`).
