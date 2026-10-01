@@ -28,8 +28,10 @@ defaults:
     # The implicit default shell doesn't.
     shell: bash
 
-# Secrets are set per job, only where tofu needs them. Actions are pinned to commit SHAs because
-# steps in the plan and apply jobs can read those secrets.
+# Secrets live in the `plan` and `production` environments, never at repo level, so a branch can't
+# read them without a reviewer's approval (plan) or being main (production). They're set per job, only
+# where tofu needs them. Actions are pinned to commit SHAs because steps in the plan and apply jobs can
+# read those secrets.
 env:
   TOFU_VERSION: 1.12.6
   TF_IN_AUTOMATION: "true"
@@ -49,6 +51,9 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: fmt
     runs-on: ubuntu-latest
+    # Holds the same secrets as production. Its required reviewers gate them: approving a run executes
+    # the branch's workflow and Terraform code with those secrets, so review the whole diff first.
+    environment: plan
     defaults:
       run:
         working-directory: terraform/glesys

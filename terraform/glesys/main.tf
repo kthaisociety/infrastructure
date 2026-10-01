@@ -12,7 +12,7 @@
 # hand-made: OpenTofu managing the key it runs with would be circular. Rotate it by hand.
 resource "glesys_objectstorage_instance" "tfstate" {
   datacenter  = var.datacenter
-  description = "Holds tfstates for KTH AI Society Infrastructure"
+  description = "kthais-tfstates"
 
   lifecycle {
     prevent_destroy = true
