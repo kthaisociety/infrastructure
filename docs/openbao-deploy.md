@@ -113,7 +113,8 @@ _Written 2026-10-01 (in the same PR as this runbook)._ New root module. Files an
   production environment, `raw.compose_file = yamlencode(...)` with one service:
   - `image: openbao/openbao:2.7.0`, `command: server`, `restart: unless-stopped`.
   - `environment.BAO_LOCAL_CONFIG = jsonencode(local.openbao_config)`.
-  - `volumes`: `openbao-data:/openbao/file` and `/etc/openbao/unseal.key:/openbao/unseal.key:ro`.
+  - `volumes`: `openbao-data:/openbao/file`, and `/etc/openbao/unseal.key` bind-mounted read-only at
+    `/openbao/unseal.key` with `create_host_path: false`, so a missing key fails the deploy.
   - `networks.dokploy-network.aliases = ["openbao"]`; `dokploy-network` declared `external: true`.
   - **No `ports`.** Nothing is published on the host.
   - `labels`: `local.openbao_labels` when `var.openbao_public`, else `["traefik.enable=false"]`.

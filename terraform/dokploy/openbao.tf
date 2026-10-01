@@ -103,7 +103,15 @@ resource "dokploy_compose" "openbao" {
           environment = { BAO_LOCAL_CONFIG = jsonencode(local.openbao_config) }
           volumes = [
             "openbao-data:/openbao/file",
-            "/etc/openbao/unseal.key:/openbao/unseal.key:ro",
+            # Long syntax so a missing key fails the deploy, instead of Docker creating an empty
+            # directory at that path.
+            {
+              type      = "bind"
+              source    = "/etc/openbao/unseal.key"
+              target    = "/openbao/unseal.key"
+              read_only = true
+              bind      = { create_host_path = false }
+            },
           ]
           networks = {
             dokploy-network = { aliases = ["openbao"] }
