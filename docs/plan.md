@@ -759,7 +759,8 @@ above, and nothing above depends on it. When we pick it up:
 4. Inside the container: `bao operator init` the empty OpenBao only to get a throwaway root token, then
    `bao operator raft snapshot restore -force` the latest snapshot from GleSYS. The restored data
    replaces the throwaway init: it auto-unseals with the same static key, and every secret, policy,
-   token, admin login and the original recovery keys are back. Revoke the throwaway root token.
+   token, admin login and the original recovery keys are back. The throwaway root token went with the
+   replaced data: check `bao token lookup` with it now fails.
 5. Apply `terraform/openbao`, then `terraform/dokploy` in full. The vault providers, the snapshot job and
    every OpenTofu-managed project are recreated and deployed, each on the image tag recorded in this
    repo. UI-managed projects are still recreated by hand.
