@@ -1,6 +1,6 @@
 # Deploying OpenBao
 
-_Written 2026-09-30. The exact steps for Phases 2–5 of [plan.md](plan.md): from no OpenBao to OpenBao
+_Written 2026-09-30; Parts A–C done 2026-10-01. The exact steps for Phases 2–5 of [plan.md](plan.md): from no OpenBao to OpenBao
 serving secrets to onboarding-service and landingpage-backend. The plan says why; this says how. Follow
 it in order: each part assumes the previous one is done and checked._
 
@@ -9,7 +9,7 @@ it in order: each part assumes the previous one is done and checked._
 | [A](#part-a-deploy-openbao-privately) | Deploy OpenBao with no public route | PRs here and in `dnscontrol`, SSH to the host | 2 |
 | [B](#part-b-initialize-by-hand) | Initialize it, create CI's login and the first admins | SSH to the host, inside the container | 3 |
 | [C](#part-c-make-it-public) | Turn on the public route and check its blocks | PR here, `curl` from a laptop | 2 |
-| [D](#part-d-configure-openbao-as-code) | `terraform/openbao` in CI | PR here | 4 |
+| [D](#part-d-configure-openbao-as-code) | `terraform/openbao` in CI, Google sign-in, the UI | PR here | 4 |
 | [E](#part-e-connect-dokploy-snapshots-and-the-first-two-apps) | Vault providers, snapshots, the first two apps | PRs here, SSH, Dokploy UI | 5 |
 
 **Why it's deployed privately first:** a fresh OpenBao isn't initialized, and whoever calls
@@ -28,6 +28,8 @@ and only then make it public. After init, `sys/init` does nothing.
 | Unseal key on the host | `/etc/openbao/unseal.key`, mounted at `/openbao/unseal.key` |
 | Seal key id | `kthais-1` (stays paired with the key for the life of the data) |
 | CI's login | JWT auth at `auth/jwt`, role `infrastructure-ci`, audience `https://bao.kthais.com` |
+| People's login | OIDC auth at `auth/oidc` (Google), role `infra-admin`, from Part D |
+| Break-glass login | `userpass`, inside the container only |
 | CI's policy | `terraform` |
 | Admin policy | `infra-admin` |
 | Dokploy panel | `https://synapse.aisociety.se` (same host) |
@@ -72,7 +74,7 @@ later** (the provider's target). We run v0.30.8.
 In the `dnscontrol` repo, `domains/kthais.com.js`, directly above `LE_CAA`:
 
 ```js
-  // bao, OpenBao secrets manager API (no UI)
+  // bao, OpenBao secrets manager (API, and the UI from Part D)
   // https://github.com/kthaisociety/infrastructure
   HOST_SYNAPSE("bao"),
 ```
@@ -112,7 +114,7 @@ _Written 2026-10-01 (in the same PR as this runbook)._ New root module. Files an
 (bools, default `false`; flipped by changing the defaults, since `*.tfvars` is gitignored).
 
 **`terraform/dokploy/outputs.tf`**: the infrastructure project's and production environment's IDs, for
-`projects.yaml` and `terraform/openbao`.
+`terraform/openbao`.
 
 **`terraform/dokploy/openbao.tf`**
 - `dokploy_project.infrastructure`.
@@ -285,6 +287,44 @@ sudo docker exec "$BAO" env BAO_ADDR=http://127.0.0.1:8200 bao status   # Sealed
 
 ## Part C: Make it public
 
+### C0. Traefik must read Docker labels
+OpenBao's route is Traefik labels, so Traefik's Docker provider has to work. Traefik before 3.6.1 can't
+talk to Docker Engine 29+, and fails quietly: file-based routes keep working, label-based ones get
+Traefik's 404 on its default certificate. Check on the host:
+
+```sh
+sudo docker exec dokploy-traefik traefik version | head -1          # 3.6.1 or later
+sudo docker exec dokploy-traefik wget -qO- http://localhost:8080/api/http/routers \
+  | tr ',' '\n' | grep '"provider"' | sort | uniq -c                  # includes "docker" once OpenBao is labelled
+```
+
+_Done 2026-10-01:_ ours was 3.1.2 on Docker 29.8.1. Before upgrading, list what else has labels, because
+it becomes routed the moment the provider works
+(`sudo docker ps -a --filter label=traefik.enable=true`); we stopped an unused MinIO first
+(`docker stop`, `docker update --restart=no`, and Stop in the Dokploy UI). Then recreate the container
+with the same binds, ports and network, only the image changed:
+
+```sh
+sudo docker pull traefik:v3.7.13
+sudo docker rename dokploy-traefik dokploy-traefik-old
+sudo docker stop dokploy-traefik-old
+sudo docker run -d --name dokploy-traefik --restart always --network dokploy-network \
+  -v /etc/dokploy/traefik/traefik.yml:/etc/traefik/traefik.yml \
+  -v /etc/dokploy/traefik/dynamic:/etc/dokploy/traefik/dynamic \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -p 80:80/tcp -p 443:443/tcp -p 443:443/udp \
+  traefik:v3.7.13
+# roll back, while dokploy-traefik-old still exists:
+#   sudo docker rm -f dokploy-traefik && sudo docker rename dokploy-traefik-old dokploy-traefik && sudo docker start dokploy-traefik
+```
+
+Keep `dokploy-traefik-old` until the sites have run on the new version for a week, then
+`sudo docker rm dokploy-traefik-old`. After that, rolling back means the same `docker run` on the old
+image (ours was `traefik:v3.1.2`), after `sudo docker rm -f dokploy-traefik`.
+
+Compare with `sudo docker inspect dokploy-traefik-old` first if Dokploy's setup may have changed. Don't
+use Dokploy's "Reload Traefik" until we know it keeps the image.
+
 ### C1. The PR
 In `terraform/dokploy/variables.tf`, set the defaults of `openbao_initialized` and `openbao_public` to
 `true`. Merge; CI applies and Dokploy redeploys the compose on `dokploy-network` with the Traefik labels. The first request
@@ -312,6 +352,12 @@ for p in '/v1//sys/init' '/v1/sys//init' '/v1/sys/%69nit' '/v1/sys%2Finit' '/v1/
 done
 ```
 
+_Done 2026-10-01 (PR #4)._ Certificate from Let's Encrypt, health `{"initialized":true,"sealed":false}`,
+308 to HTTPS, every blocked path 403. Path tricks: all 403 except `%2F` (`/v1/sys%2Finit`: 405
+`unsupported operation`) and uppercase (`/v1/SYS/init`: OpenBao's `permission denied`). Those pass
+Traefik but match no real endpoint: `/v1/sys%2Fhealth` is a 405 too, so OpenBao doesn't decode `%2F`, and
+its paths are case-sensitive. Recorded as verify item 9.
+
 If any path trick returns what `curl -s $H/v1/sys/init` would return from inside the container
 (`{"initialized":true}`) instead of 403/404, **turn the route off again** (`openbao_public = false`; `openbao_initialized` stays `true`, so
 Dokploy can still reach it) and
@@ -321,30 +367,27 @@ change `bao-blocked` to an allowlist before retrying.
 
 ## Part D: Configure OpenBao as code
 
-### D1. `terraform/projects.yaml`
-The first version lists the infrastructure project and the two first apps. Dokploy IDs for UI-managed
-projects are written here directly: the `dokploy_project` and `dokploy_environment` data sources would
-copy each project's shared env vars into state.
+### D1. The first two project folders
+Each project is a folder, `terraform/projects/<project>/project.yaml` (plan, "Projects are folders").
+The first two are still managed in the Dokploy UI, so they're `managed: false` with their Dokploy IDs,
+written here directly: the `dokploy_project` and `dokploy_environment` data sources would copy each
+project's shared env vars into state.
 
 ```yaml
-projects:
-  infrastructure:
-    environments:
-      production: { dokploy_project_id: "<from terraform/dokploy>", dokploy_environment_id: "<…>" }
-  onboarding-service:
-    repo: kthaisociety/onboarding-service
-    environments:
-      production: { dokploy_project_id: "<id>", dokploy_environment_id: "<id>" }
-    shared: [onboarding-service-secret]
-  landingpage-backend:
-    repo: kthaisociety/landingpage-backend
-    environments:
-      production: { dokploy_project_id: "<id>", dokploy_environment_id: "<id>" }
+# terraform/projects/onboarding-service/project.yaml
+name: onboarding-service
+repo: kthaisociety/onboarding-service
+managed: false
+environments:
+  production:
+    dokploy_project_id: "<id>"
+    dokploy_environment_id: "<id>"
     shared: [onboarding-service-secret]
 ```
 
-The IDs are in the Dokploy URL when a project or environment is open. The infrastructure project's
-come from `terraform/dokploy` instead (its outputs, read through remote state).
+`landingpage-backend` is the same shape. The IDs are in the Dokploy URL when a project or environment is
+open. The `infrastructure` project isn't a folder: `terraform/dokploy` creates it, and its
+`infrastructure/production` path is written by OpenTofu (snapshots, E2).
 
 ### D2. The PR: `terraform/openbao`
 **`versions.tf`**
@@ -394,19 +437,62 @@ come from `terraform/dokploy` instead (its outputs, read through remote state).
   path "auth/userpass/users/+/password" { capabilities = ["update"] }
   ```
 
-- For each project-environment in `projects.yaml`: `vault_policy` `dokploy-project-<project>-<env>`
-  (read `secret/data/<project>/<env>`, read+list the matching `secret/metadata/` path, read
-  `secret/data/shared/<name>/<env>` for each shared secret, read `auth/token/lookup-self`), and a
-  `vault_token` from the `dokploy-provider` role with that policy, `renewable = true`,
-  `renew_min_lease = 14 days`, `renew_increment = 768h`. Output the tokens (sensitive) for
+- **`projects.tf`**: `module "app_secrets"` with `for_each` over
+  `fileset(path.module, "../projects/*/project.yaml")`. **`terraform/modules/app-secrets`**, per
+  environment: `vault_policy` `dokploy-project-<project>-<env>` (read `secret/data/<project>/<env>`,
+  read+list the matching `secret/metadata/` path, read `secret/data/shared/<name>/<env>` for each shared
+  secret, read `auth/token/lookup-self`); a `vault_token` from the `dokploy-provider` role with that
+  policy, `renewable = true`, `renew_min_lease = 14 days`, `renew_increment = 768h`; and the empty path,
+  by writing only `secret/metadata/<project>/<env>` (verify item 10). Output the tokens (sensitive) for
   `terraform/dokploy`.
 - Snapshots: `vault_policy` `openbao-snapshots` (read `sys/storage/raft/snapshot`), a `vault_token`
   with `no_parent = true`, `period = 768h`, the same renewal settings, and `vault_kv_secret_v2`
   `infrastructure/production` holding `SNAPSHOT_TOKEN` and the GleSYS snapshot credential
   (`S3_ACCESS_KEY`, `S3_SECRET_KEY`) from `terraform/glesys`'s outputs.
 
+**`oidc.tf`**: people's login, Google directly (plan, "People log in with Google").
+
+```hcl
+resource "vault_jwt_auth_backend" "oidc" {
+  path               = "oidc"
+  type               = "oidc"
+  oidc_discovery_url = "https://accounts.google.com"
+  bound_issuer       = "https://accounts.google.com"
+  oidc_client_id     = var.openbao_oidc_client_id
+  oidc_client_secret = var.openbao_oidc_client_secret
+  default_role       = "infra-admin"
+}
+
+resource "vault_jwt_auth_backend_role" "infra_admin" {
+  backend        = vault_jwt_auth_backend.oidc.path
+  role_name      = "infra-admin"
+  role_type      = "oidc"
+  user_claim     = "email"
+  oidc_scopes    = ["openid", "email"]
+  allowed_redirect_uris = [
+    "https://bao.kthais.com/ui/vault/auth/oidc/oidc/callback",
+    "http://localhost:8250/oidc/callback",
+  ]
+  bound_claims = {
+    hd    = "kthais.com"
+    email = join(",", var.openbao_admin_emails)
+  }
+  token_policies = ["infra-admin"]
+  token_ttl      = 3600
+  token_max_ttl  = 3600
+}
+```
+
+**`variables.tf`**: `openbao_jwt` (sensitive, ephemeral), `openbao_oidc_client_id`,
+`openbao_oidc_client_secret` (sensitive), and `openbao_admin_emails`, defaulting to sam@, vilhelm@,
+pavlos.spanoudakis@ and max.astrand@kthais.com.
+
+**`terraform/dokploy/openbao.tf`**: `ui = true`, in this same PR. `openbao-apply` runs before
+`dokploy-apply` (below), so the login page only exists once the Google login does. The public route already passes `/ui` and `/v1/auth/oidc`.
+
 **`tofu.yml`**: an `openbao-apply` job on `main`, `environment: production`,
-`needs: [glesys-apply, dokploy-apply]` on this first run order (see plan, "Bootstrap order"), with
+`needs: glesys-apply`, with `dokploy-apply` now needing `openbao-apply`: the steady-state order
+(plan, "Bootstrap order", steps 5 and 6), and
 `permissions: id-token: write`. Before `tofu init`:
 
 ```sh
@@ -416,14 +502,29 @@ echo "::add-mask::$JWT"
 echo "TF_VAR_openbao_jwt=$JWT" >> "$GITHUB_ENV"
 ```
 
+and the Google client from the `production` environment's secrets:
+
+```yaml
+env:
+  TF_VAR_openbao_oidc_client_id: ${{ secrets.OPENBAO_OIDC_CLIENT_ID }}
+  TF_VAR_openbao_oidc_client_secret: ${{ secrets.OPENBAO_OIDC_CLIENT_SECRET }}
+```
+
 No `openbao-plan` job on PRs: CI's OpenBao login is bound to `production`, which only runs on `main`,
 and a read-only PR login would still read every secret while refreshing state. PRs get `tofu fmt` and
 `tofu validate`; the apply run on `main` prints its plan first. Add a weekly `schedule:` trigger that
 runs `openbao-apply`, which renews the tokens.
 
 ### D3. Merge and check
-The `openbao-apply` job succeeds and its plan showed no changes to the imported resources. Then, on the
-host, _(in the container)_:
+The `openbao-apply` job succeeds and its plan showed no changes to the imported resources.
+
+**Google sign-in**, in a browser: `https://bao.kthais.com/ui`, method OIDC, role `infra-admin`, sign in
+with a listed kthais.com account. The UI shows `secret/` with an empty `onboarding-service/production`
+and `landingpage-backend/production`. `secret/infrastructure/` is denied. A kthais.com account not on the
+list gets `claim "email" does not match`. From a laptop, `BAO_ADDR=https://bao.kthais.com bao login
+-method=oidc role=infra-admin` works too.
+
+**Break-glass**, on the host, _(in the container)_:
 
 ```sh
 bao login -method=userpass username=<name>        # works; note the token
@@ -448,23 +549,24 @@ That's verify item 8. If it succeeds, the token binding isn't doing its job: sto
 ### E1. The PR: vault providers
 In `terraform/dokploy`:
 - A `terraform_remote_state` for `terraform/openbao` (with a `remote_state_data_sources` encryption
-  entry) and `yamldecode(file("../projects.yaml"))`.
-- `vault.tf`: for each project-environment, `dokploy_vault_provider` named `<project>-<env>`:
+  entry), and the projects read with `fileset` and `yamldecode` as in `terraform/openbao`.
+- `projects.tf`: `module "app"` per `project.yaml`. For `managed: false` projects
+  (`terraform/modules/app` does only this), a `dokploy_vault_provider` per environment named
+  `<project>-<env>`, assigned to the IDs from `project.yaml`:
 
   ```hcl
   hashicorp = {
     url              = "http://openbao:8200"
     mount            = "secret"
-    token_wo         = local.tokens[each.key]
-    token_wo_version = parseint(substr(sha256(local.tokens[each.key]), 0, 8), 16)
+    token_wo         = var.token
+    token_wo_version = parseint(substr(sha256(var.token), 0, 8), 16)
   }
-  assignments       = [{ project_id = each.value.dokploy_project_id, environment_ids = [each.value.dokploy_environment_id] }]
+  assignments       = [{ project_id = var.dokploy_project_id, environment_ids = [var.dokploy_environment_id] }]
   verify_connection = true
   ```
 
   The version comes from a hash of the token, so a new token reaches Dokploy without anyone bumping a
   number.
-- `tofu.yml`: from now on, `dokploy-apply` needs `openbao-apply` (the steady-state order).
 
 Merge. `verify_connection` proves every token works from Dokploy's server over `dokploy-network`.
 
@@ -513,18 +615,15 @@ For **onboarding-service**, then **landingpage-backend**:
 
 1. **Collect the current values.** In Dokploy, open the app → Environment. Note which variables are
    secrets. Copy the whole env into a 1Password item ("<app> env before OpenBao, <date>").
-2. **Write them to OpenBao** _(in the container, logged in as an infra admin)_:
-
-   ```sh
-   bao kv put secret/onboarding-service/production - <<'EOF'
-   { "MATTERMOST_BOT_TOKEN": "…", "GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON": "…" }
-   EOF
-   bao kv put secret/shared/onboarding-service-secret/production - <<'EOF'
-   { "ONBOARDING_SERVICE_SECRET": "…" }
-   EOF
-   ```
-
-   (The shared secret once, not per app.)
+2. **Write them to OpenBao** in the UI (`https://bao.kthais.com/ui`, Google sign-in):
+   `secret/onboarding-service/production` gets one key per secret (`MATTERMOST_BOT_TOKEN`,
+   `GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON`, …), and `secret/shared/onboarding-service-secret/production`
+   gets `ONBOARDING_SERVICE_SECRET`, once, not per app. With the CLI from a laptop instead,
+   one key at a time, pasting each value so it stays out of shell history: the first key with
+   `bao kv put secret/onboarding-service/production MATTERMOST_BOT_TOKEN=-`, every further key with
+   `bao kv patch secret/onboarding-service/production GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON=-`. `kv put`
+   replaces the whole secret, so a second `put` would delete the keys already there. In the UI, "Create
+   new version" shows the existing keys; add to them, don't replace them.
 3. **Replace values with references** in the app's Environment in the Dokploy UI. In the UI there's no
    `$$` escaping; that's only for HCL:
 
