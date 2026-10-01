@@ -235,7 +235,7 @@ Only a job in this repo's `production` environment gets a token GitHub signs wit
 `production` is limited to `main`.
 
 ### B3. The first infra admins
-_(in the container)_, once per admin (2–3 people):
+_(in the container)_, once per admin. Today: `sam` and `vilhelm`.
 
 ```sh
 bao auth enable userpass      # first time only
