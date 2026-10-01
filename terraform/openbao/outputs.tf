@@ -4,7 +4,7 @@ output "dokploy_providers" {
   description = "Per project environment (<project>-<environment>): the provider's name, the secret path and its token."
   value = merge(
     {
-      for k, m in module.project_secrets : k => {
+      for m in module.project_secrets : m.provider_name => {
         name  = m.provider_name
         path  = m.path
         token = m.token

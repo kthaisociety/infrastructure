@@ -9,7 +9,7 @@ locals {
 
   project_environments = merge([
     for p, cfg in local.projects : {
-      for env, env_cfg in cfg.environments : "${p}-${env}" => {
+      for env, env_cfg in cfg.environments : "${p}/${env}" => {
         project     = p
         environment = env
         shared      = try(env_cfg.shared, [])
