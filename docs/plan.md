@@ -204,7 +204,8 @@ the image's `BAO_LOCAL_CONFIG` env var. The image's entrypoint writes it to its 
 
 ### OpenBao is initialized by hand, once
 _Decided 2026-09-30._ After the first deploy, an operator runs `bao operator init` inside the container. It returns
-recovery keys (one each for Sam and Vilhelm, threshold 1, in 1Password; 3 shares, threshold 2 once there's a third holder) and a root token. The root token sets up the
+recovery keys (3 shares, threshold 2: Sam, Vilhelm and the org break-glass vault, each in 1Password; done
+2026-10-01) and a root token. The root token sets up the
 GitHub Actions JWT auth for this repo and the first infra admin logins (Phase 3), and is then revoked.
 
 - **Why:** initialization happens once in the life of the data. A rebuilt host restores a snapshot and
@@ -752,11 +753,13 @@ above, and nothing above depends on it. When we pick it up:
 2. Start a fresh `terraform/dokploy` state: move the old state object in GleSYS aside (e.g. to
    `dokploy-lost-<date>/`) rather than deleting it. Every ID in it points at the dead server.
 3. Place the OpenBao unseal key from 1Password on the host. Apply `terraform/dokploy` targeting core
-   and OpenBao only.
+   and OpenBao only, **with `-var openbao_initialized=false -var openbao_public=false`**: the defaults in
+   git are `true`, and an empty OpenBao on `dokploy-network` can be initialized by any container there.
+   Check it's on its own `_default` network only (runbook A6) before going on.
 4. Inside the container: `bao operator init` the empty OpenBao only to get a throwaway root token, then
    `bao operator raft snapshot restore -force` the latest snapshot from GleSYS. The restored data
    replaces the throwaway init: it auto-unseals with the same static key, and every secret, policy,
-   token, admin login and the original recovery keys are back.
+   token, admin login and the original recovery keys are back. Revoke the throwaway root token.
 5. Apply `terraform/openbao`, then `terraform/dokploy` in full. The vault providers, the snapshot job and
    every OpenTofu-managed project are recreated and deployed, each on the image tag recorded in this
    repo. UI-managed projects are still recreated by hand.

@@ -290,6 +290,10 @@ In `terraform/dokploy/variables.tf`, set the defaults of `openbao_initialized` a
 `true`. Merge; CI applies and Dokploy redeploys the compose on `dokploy-network` with the Traefik labels. The first request
 may take a minute while Traefik gets the certificate.
 
+**On a fresh host** (disaster recovery, or anything that starts with an empty data volume), the defaults
+are now wrong: apply with `-var openbao_initialized=false -var openbao_public=false` first, and only drop
+those once OpenBao is initialized or restored. See plan, "Disaster recovery".
+
 ### C2. Check the route and every block
 From a laptop:
 
