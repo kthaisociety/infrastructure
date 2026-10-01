@@ -448,8 +448,9 @@ OpenBao policies give per-path, per-operation control. Some things can't be prev
 | This repo's CI | Everything in Dokploy and OpenBao |
 
 So: keep Dokploy admins and SSH users to a minimum, give each project's Dokploy access and OpenBao
-policy to the same people, keep non-runtime secrets in paths no Dokploy provider token can read, and
-limit write access to this repo to infra admins.
+policy to the same people, and keep non-runtime secrets in paths no Dokploy provider token can read.
+This repo's `main` can only be changed by org admins (a ruleset), and its secrets only reach a job
+through an environment (below), so write access alone reads nothing.
 
 ### OpenTofu runs only in CI, never on a laptop
 Every root module is planned on PRs and applied on merge to `main` by GitHub Actions.
@@ -458,14 +459,18 @@ Every root module is planned on PRs and applied on merge to `main` by GitHub Act
   backend), `TF_VAR_state_passphrase`, `GLESYS_USERID` / `GLESYS_TOKEN` (GleSYS API key for
   `terraform/glesys`), and the Dokploy API key. Each is set only on the jobs that need it. GleSYS
   credentials can't be read-only, so plan and apply use the same ones. Plans run with `-lock=false`.
+- **Where the secrets live:** in two GitHub environments holding the same values, never at repo level.
+  `production` (apply) is limited to `main`, with no admin bypass. `plan` (PR plans) needs approval from
+  an infra admin (`sammosios`, `vilhelmprytz`); admins can approve their own runs.
 - **Apply** runs only in the `production` environment, limited to `main`.
 - **Order on merge:** `glesys` → `openbao` → `dokploy`, as jobs in one workflow, all on GitHub-hosted
   runners. On the very first build the order is different (see [Bootstrap order](#bootstrap-order)).
 - **Dokploy auth:** an API key for a dedicated Dokploy `terraform` admin user, generated in the UI with
   rate limiting **off** (a rate-limited key answers `401` mid-apply, not `429`). Dokploy has no read-only
   API keys, so plan needs the same admin key as apply.
-- Because plan needs these secrets, anyone who can push a branch here can read them. Repo write access
-  is limited to infra admins.
+- Because plan needs these secrets, approving a PR's plan runs that branch's workflow and Terraform code
+  with them. Review the whole diff first, including `external` data sources, `local-exec` and lockfile
+  changes. Anyone with write access can open PRs; nobody without an approval reads a secret.
 
 ### 1Password holds break-glass material
 OpenBao recovery keys and static unseal key, the GleSYS API key and the `tfstate` credential, the
@@ -518,7 +523,7 @@ in the same run.
 ## Repo layout
 
 ```
-infrastructure/                       # github.com/kthaisociety/infrastructure (private)
+infrastructure/                       # github.com/kthaisociety/infrastructure (public)
   terraform/
     projects.yaml # every project: environments, source repo; read by openbao/, dokploy/ and deploy.yml
     glesys/       # object storage instances, credentials                            — CI                [written]
@@ -559,8 +564,10 @@ we extract it into `terraform/modules/` and have projects call it.
 1. _(Done)_ In the GleSYS UI: create the `tfstate` instance, a credential on it, and the `kthais-tfstate`
    bucket. Create a GleSYS API key. Store both in 1Password.
 2. _(Done)_ Generate the state passphrase and store it in 1Password.
-3. GitHub settings: a `production` environment limited to `main`, the secrets above, and branch
-   protection on `main`.
+3. _(Done 2026-10-01)_ GitHub settings: repo public (free rulesets); a `main` ruleset (restrict updates
+   to org admins, signed commits, linear history, no force-push or deletion); the `production` and
+   `plan` environments above, each with the secrets; non-admins on triage; workflow token read-only;
+   approval for all outside contributors' runs.
 4. _(Written 2026-09-30)_ `terraform/glesys`: imports the four existing instances, and creates the
    `openbao-snapshots` instance and the snapshot job's credential. `tofu.yml` plans it on PRs and applies
    it on merge.
