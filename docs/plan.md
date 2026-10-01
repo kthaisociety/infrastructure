@@ -203,7 +203,7 @@ the image's `BAO_LOCAL_CONFIG` env var. The image's entrypoint writes it to its 
 
 ### OpenBao is initialized by hand, once
 _Decided 2026-09-30._ After the first deploy, an operator runs `bao operator init` inside the container. It returns
-recovery keys (split among 2–3 key holders, in 1Password) and a root token. The root token sets up the
+recovery keys (one each for Sam and Vilhelm, threshold 1, in 1Password; 3 shares, threshold 2 once there's a third holder) and a root token. The root token sets up the
 GitHub Actions JWT auth for this repo and the first infra admin logins (Phase 3), and is then revoked.
 
 - **Why:** initialization happens once in the life of the data. A rebuilt host restores a snapshot and

@@ -184,12 +184,18 @@ Do this right after A6, in one sitting, with the recovery key holders reachable.
 _(in the container)_
 
 ```sh
-bao operator init -recovery-shares=3 -recovery-threshold=2
+bao operator init -recovery-shares=2 -recovery-threshold=1
 ```
 
-It prints 3 recovery keys and a root token.
-- Each recovery key goes to 1Password as its own item ("OpenBao recovery key 1/3" …), each shared with a
-  different key holder. Any 2 of the 3 can generate a new root token in an emergency.
+It prints 2 recovery keys and a root token.
+- Key holders: Sam (`sammosios`) and Vilhelm (`vilhelmprytz`). Each recovery key goes to 1Password as its
+  own item ("OpenBao recovery key 1/2", "2/2"), each shared with only its holder. Either one alone can
+  generate a new root token in an emergency.
+- Why a threshold of 1: both holders are org admins who can already reach CI's `terraform` policy
+  (`sudo` on everything) by pushing to `main`, so requiring both adds little; what matters is that
+  losing one holder doesn't lose recovery. When a third holder joins, rekey to 3 shares, threshold 2,
+  from inside the container: `bao operator rekey -target=recovery -init -key-shares=3 -key-threshold=2`,
+  then `bao operator rekey -target=recovery` with one current key, and hand out the new keys.
 - The root token stays in this shell only. Never store it: it's revoked in B5.
 
 ```sh
