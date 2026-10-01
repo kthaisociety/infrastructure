@@ -3,8 +3,8 @@
 _Written 2026-09-29. Revised 2026-09-30: Dokploy managed with OpenTofu, state and backups on GleSYS, no
 GCP dependency for the foundation. Revised again 2026-09-30: lessons from the DD2482 prototype, OpenBao's
 deployment and bootstrap order settled, app delivery through this repo, OpenBao's API public with no
-personal logins for now, and phases reordered so OpenBao comes first. Status: `terraform/glesys` written;
-nothing else written or applied yet._
+personal logins for now, and phases reordered so OpenBao comes first. Status: `terraform/glesys` applied, CI
+secrets in the `plan` and `production` environments (2026-10-01); nothing else written yet._
 
 **Next milestone:** OpenBao defined in this repo, running on the VPS, and serving secrets to one or two
 apps (Phases 2–5). Everything after that is ordered but not scheduled.

@@ -146,7 +146,7 @@ New root module. Files and what's in them:
   - `traefik.enable=true`, `traefik.docker.network=dokploy-network`.
   - In `yamlencode` input, a literal `$` is `$$`; none of these labels need one.
 
-**`.github/workflows/tofu.yml`**: `dokploy-plan` (PRs) and `dokploy-apply` (main, `production`
+**`.github/workflows/tofu.yml`**: `dokploy-plan` (PRs, `plan` environment) and `dokploy-apply` (main, `production`
 environment, `needs: glesys-apply`), shaped like the `glesys` jobs, with `TF_VAR_dokploy_url` from the
 variable and `TF_VAR_dokploy_api_key` from the secret. On `main`, runs only after `glesys-apply`.
 
