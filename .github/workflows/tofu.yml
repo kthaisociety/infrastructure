@@ -173,6 +173,9 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: fmt
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # a GitHub OIDC token for the subject check below; it never reaches OpenBao
     defaults:
       run:
         working-directory: terraform/openbao
@@ -197,6 +200,32 @@ jobs:
             done
           done
           $ok
+      # CI's OpenBao login (openbao-apply) is only ever tried on main, so check here that the repo part of
+      # the role's bound `sub` still matches what GitHub puts in this repo's tokens: the subject format
+      # (immutable or name-only) or the repo's name can change outside this repo. The token is asked
+      # for with another audience, so OpenBao would refuse it anyway, and only its `sub` is printed.
+      - name: CI login subject matches GitHub's
+        run: |
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::notice::No OIDC token on this run (a fork's PR); subject check skipped."
+            exit 0
+          fi
+          JWT=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=kthais-subject-check" | jq -r .value)
+          echo "::add-mask::$JWT"
+          payload=$(cut -d. -f2 <<<"$JWT" | tr '_-' '/+')
+          while (( ${#payload} % 4 )); do payload+="="; done
+          sub=$(base64 -d <<<"$payload" | jq -r .sub)
+          bound=$(sed -nE 's/^ *bound_claims *= *\{ *sub *= *"([^"]+)".*/\1/p' main.tf)
+          # repo:<owner>/<repo>, with or without @<id>s; the rest is the environment or event.
+          have=$(cut -d: -f1-2 <<<"$sub")
+          want=$(cut -d: -f1-2 <<<"$bound")
+          echo "GitHub's token: $sub"
+          echo "Role binds:     $bound"
+          if [ -z "$want" ] || [ "$have" != "$want" ]; then
+            echo "::error file=terraform/openbao/main.tf::infrastructure-ci binds '$want', but GitHub's tokens say '$have'. openbao-apply would fail to log in."
+            exit 1
+          fi
 
   openbao-apply:
     # On a push to main after glesys-apply, and alone on the weekly schedule or a manual run (glesys-apply
