@@ -1,6 +1,9 @@
 # Delivery plan: builds, releases and deploys
 
-_Written 2026-10-02. Status: proposed. Nothing here is built yet._
+_Written 2026-10-02. Status (end of 2026-10-02): steps 1, 2 (OpenBao side), 4 and the `deployments`
+OpenTofu are built; `deploy.yml` (step 5) isn't. Using it: [app-delivery.md](app-delivery.md); bot
+identities: [bot-accounts.md](bot-accounts.md); the first app:
+[onboarding-service-migration.md](onboarding-service-migration.md)._
 
 How an app goes from a merged PR to running on Dokploy: every app repo builds images in CI and pushes
 them to a registry; versions follow semantic commits and approved releases; a separate **deployments**
@@ -193,23 +196,50 @@ Two credentials, kept apart:
 
 ## Build order
 
-1. **This plan**, reviewed (#10, merged 2026-10-02). Questions 1–3 are answered.
-2. **`deployments` repo**: repo, rulesets, `production`/`plan` environments, its own OpenBao JWT role and
-   policy (made in `infrastructure`), its Dokploy key, its weekly apply. `deployments` mints the tokens
-   and creates the Dokploy side; then `infrastructure` drops its own provider tokens. The first apply is
-   also the test of open question 3: if `Deployments CI` can't create a vault provider, it fails there.
-3. ~~GHCR pull credential~~: not needed, images are public. Verify instead that Dokploy pulls a public
-   GHCR image with no registry set (verify item 4, reworded).
-4. **Reusable workflows**: semantic PR titles, build, release. Then onboarding-service adopts them:
-   rulesets, `CODEOWNERS`, first image, first release `1.0.0`.
-5. **`deploy.yml` and the GitHub App.** Until it exists, `release.yaml` is bumped by hand in a PR.
-6. **onboarding-service on the new project**, image-based. The migration doc's data copy and switchover
-   steps stay as they are; only the source changes from the GitHub App to `release.yaml`.
-7. The next projects, one at a time: landingpage-backend, then the rest.
-8. **[`docs/app-delivery.md`](app-delivery.md)** (outline written 2026-10-02): one linear guide, from a `git push` or a merged release PR to the app
-   running on Dokploy: every check, approval, workflow and apply on the way, what each one proves, how
-   to roll back, and where to look when a step fails. Each step above adds a draft section as it's
-   built; it's finished last, against the real system, so it describes what exists.
+1. **This plan** — done (#10, 2026-10-02).
+2. **`deployments` repo** — built 2026-10-02: public repo, rulesets (checks with no bypass; human review
+   that only `kthais-deploy` bypasses), `production`/`plan` environments and secrets, the `deployments-ci`
+   OpenBao login (#16), project policies in `infrastructure`'s `projects.yaml` (#17), OpenTofu root and
+   `modules/project` with weekly apply and the stale-commit guard (deployments#1). Its first apply is the
+   test of open question 3.
+3. ~~GHCR pull credential~~ — not needed: images of public repos are public. Dokploy pulling one with
+   no registry is checked on the first staging deploy (verify item 4, reworded).
+4. **Reusable workflows** — built: `kthaisociety/workflows` `v0.1.0` (semantic PR titles, build,
+   release). onboarding-service adopted them (onboarding-service#9): first image pushed; first release
+   pending (needs a `Release-As:` commit); its ruleset still lacks the PR and check rules.
+5. **`deploy.yml`** — not yet. Until it exists, deploying is a one-line `release.yaml` PR.
+6. **onboarding-service on the new project** — in progress, steps in
+   [onboarding-service-migration.md](onboarding-service-migration.md).
+7. The next projects, one at a time: landingpage-backend (needs Postgres and a domain in
+   `modules/project`), then the rest.
+8. **[`docs/app-delivery.md`](app-delivery.md)** — written 2026-10-02 against what exists, each part
+   marked built or not yet; finished when step 5 is.
+
+## Decisions made while building (2026-10-02)
+
+- **A project's OpenBao side is one line in `infrastructure`** (`terraform/openbao/projects.yaml`,
+  `my-app: {}`). Policies decide what tokens read, so only the strict repo writes them (Greptile on #16
+  showed a CI that writes `dokploy-project-*` policies can grant itself anything). Rejected: one policy
+  per project for all its environments (staging could read production's secrets); `infrastructure`
+  reading `deployments`' project list at apply time (no `infrastructure` edits, but a run-time dependency
+  between the repos, an extra App permission and a "start the other run and wait" step, which is the
+  kind of plumbing that breaks quietly). The manual line is rare (new projects and environments only),
+  and `deployments`' check fails with the exact line, so it can't be forgotten.
+- **Design frozen here.** Remaining effort goes into finishing and documenting what exists, not new
+  mechanisms; the template grows only when an app needs it.
+- **Template scope.** `modules/project` builds one app per environment from an image, with env, secrets
+  and volumes. Not yet: domains, Postgres, Redis, build arguments. Each is added with the first app that
+  needs it (domains and Postgres with landingpage-backend). Apps whose framework bakes env into the
+  build (Next.js `NEXT_PUBLIC_*`) need checking first: one image runs in both environments.
+- **Domains:** `project.yaml` will declare them per environment, and `modules/project` will create the
+  Dokploy domain (Traefik route, certificate). DNS stays a manual `dnscontrol` PR per host; later,
+  `deployments` may open that PR itself when a new domain appears.
+- **Images follow their repo's visibility.** A GHCR package linked to a public repo is public; no
+  per-package step.
+- **`vault_token` despite its deprecation warning:** a stable token per provider, renewed in place.
+  An ephemeral token would be new on every apply and churn every Dokploy provider.
+- **OpenTofu 1.12.6 in both repos.** 1.13.1 came out 2026-10-01; upgrade both together, in one PR each.
+- **`deployments` state** shares `kthais-tfstate` under its own key and passphrase (see "Two repos").
 
 ## Bot accounts and credentials
 
@@ -283,8 +313,7 @@ No GHCR pull account: images are public (see "Builds").
    2026-10-02, **public, and it must stay public**: a public repo can't call reusable workflows from a
    private one (the "organization" Actions access setting only opens a private repo to other private
    repos), and every app repo is public. It holds no secrets.
-7. **PR plans in `deployments`.** Its CI login can mint tokens that read project secrets (see "Two repos"),
-   so it can't be handed to unreviewed PR code. Default: PR plans in the `plan` environment behind a
-   reviewer, as in `infrastructure`. Option: a separate PR role whose policy can read policies and look
-   up tokens but not create tokens or write policies. Bot PRs then need a reviewer for their plan, or
-   skip the plan (they only change an image line).
+7. ~~PR plans in `deployments`.~~ **In the `plan` environment, after a reviewer approves the run**
+   (2026-10-02): `deployments-ci` accepts both `production` and `plan` (#16), since even a plan needs the
+   OpenBao login (one root with both providers). Bot PRs skip the plan: they only change an image line,
+   and `bot-scope` enforces that.
