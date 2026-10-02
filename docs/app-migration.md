@@ -60,13 +60,15 @@ for p in get("project.all"):
         ids = {"postgres": "postgresId", "redis": "redisId", "mysql": "mysqlId", "mariadb": "mariadbId", "mongo": "mongoId"}
         for kind in ("applications", "postgres", "redis", "mysql", "mariadb", "mongo", "compose"):
             for s in e.get(kind) or []:
-                extra = ""
+                extra, name, app_name = "", s.get("name"), s.get("appName")
                 if kind in ids:  # databases: the image carries the version
                     d = get(f"{kind}.one?{ids[kind]}={s[ids[kind]]}")
+                    name, app_name = d.get("name"), d.get("appName")
                     extra = f" image={d.get('dockerImage')} db={d.get('databaseName')} user={d.get('databaseUser')}"
-                print(f"[{e['name']}] {kind}: {s.get('name')} appName={s.get('appName')}{extra}")
+                print(f"[{e['name']}] {kind}: {name}{extra}" + (f" appName={app_name}" if app_name else ""))
         for a in e.get("applications") or []:
             d = get(f"application.one?applicationId={a['applicationId']}")
+            print("  app:", d.get("name"), "appName (internal host name):", d.get("appName"))
             print("  source:", d.get("sourceType"), d.get("owner"), d.get("repository"), d.get("branch"),
                   "| build:", d.get("buildType"), d.get("dockerfile"), "| autoDeploy:", d.get("autoDeploy"))
             for line in (d.get("env") or "").splitlines():
