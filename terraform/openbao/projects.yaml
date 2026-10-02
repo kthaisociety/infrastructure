@@ -1,0 +1,16 @@
+# Every project's OpenBao side: per environment, the policy dokploy-project-<project>-<env> and the empty
+# secret path secret/<project>/<env>, to fill in the OpenBao UI. Everything else about a project (its
+# Dokploy side, secret names, images) is in kthaisociety/deployments, whose checks fail until the
+# project is listed here.
+#
+# Policies live here, not in deployments: a policy's contents decide what a token minted with it can
+# read, and deployments' CI may mint tokens with them.
+#
+# Adding a project is one line:   my-app: {}
+# Defaults: environments [staging, production], no shared secrets. Optional keys:
+#   environments: [...]   # environment names: lowercase letters and digits only
+#   shared: [...]         # shared secrets it reads, at secret/shared/<name>/<env>, in every environment
+
+onboarding-service:
+  # ONBOARDING_SERVICE_SECRET, also read by landingpage-backend.
+  shared: [onboarding-service-secret]

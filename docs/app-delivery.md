@@ -72,9 +72,11 @@ A checklist, in order, with who does each step and what "done" looks like.
   history, all conversations resolved, required checks (title, tests, `Greptile Review`).
 
 ### 2.2 In `infrastructure`, then `deployments` **[step 4]**
-- `infrastructure` PR first: the project, its environments and shared secrets in `terraform/openbao`'s
-  project list. That writes its `dokploy-project-<project>-<env>` policies and empty secret paths.
-  Policies live here, not in `deployments`, because their contents decide what a token can read.
+- `infrastructure` PR first: one line in `terraform/openbao/projects.yaml`, `my-app: {}` (staging and
+  production by default; add `shared: [...]` if it reads shared secrets). That writes its
+  `dokploy-project-<project>-<env>` policies and empty secret paths. Policies live here, not in
+  `deployments`, because their contents decide what a token can read. `deployments`' checks fail with
+  exactly this line if it's missing.
 - `projects/<project>/project.yaml`: image name, port, domain (if any), volumes, non-secret env and
   secret names per environment.
 - PR, merge: creates the Dokploy project with `staging` and `production`, a vault provider per

@@ -1,5 +1,5 @@
 variable "project" {
-  description = "Project name, as in its folder under terraform/projects/."
+  description = "Project name: its key in terraform/openbao/projects.yaml, and its folder in kthaisociety/deployments."
   type        = string
   validation {
     condition     = can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", var.project))

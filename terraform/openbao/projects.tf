@@ -1,18 +1,15 @@
-# Every folder under terraform/projects/ with a project.yaml gets, per environment, a policy, a Dokploy
-# provider token and an empty secret path (modules/project-secrets). terraform/dokploy reads the tokens.
+# Every project in projects.yaml gets, per environment, a policy, a Dokploy provider token and an empty
+# secret path (modules/project-secrets).
 
 locals {
-  projects = {
-    for f in fileset(path.module, "../projects/*/project.yaml") :
-    basename(dirname(f)) => yamldecode(file("${path.module}/${f}"))
-  }
+  projects = yamldecode(file("${path.module}/projects.yaml"))
 
   project_environments = merge([
     for p, cfg in local.projects : {
-      for env, env_cfg in cfg.environments : "${p}/${env}" => {
+      for env in try(cfg.environments, ["staging", "production"]) : "${p}/${env}" => {
         project     = p
         environment = env
-        shared      = try(env_cfg.shared, [])
+        shared      = try(cfg.shared, [])
       }
     }
   ]...)

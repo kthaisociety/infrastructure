@@ -218,14 +218,14 @@ jobs:
       - run: tofu validate
       # modules/project-secrets checks these too, but only at plan time, which is the apply on main.
       - name: project and environment names
-        working-directory: terraform/projects
+        working-directory: terraform/openbao
         run: |
           ok=true
-          for f in */project.yaml; do
-            p=${f%/project.yaml}
-            echo "$p" | grep -qxE '[a-z0-9]+(-[a-z0-9]+)*' || { echo "::error file=terraform/projects/$f::project name: lowercase letters, digits, single hyphens"; ok=false; }
-            for e in $(yq -r '.environments | keys | .[]' "$f"); do
-              echo "$e" | grep -qxE '[a-z0-9]+' || { echo "::error file=terraform/projects/$f::environment '$e': lowercase letters and digits only, no hyphens"; ok=false; }
+          for p in $(yq -r 'keys | .[]' projects.yaml); do
+            grep -qxE '[a-z0-9]+(-[a-z0-9]+)*' <<<"$p" && [ "$p" != infrastructure ] && [ "$p" != shared ] \
+              || { echo "::error file=terraform/openbao/projects.yaml::project '$p': lowercase letters, digits and single hyphens; not infrastructure or shared"; ok=false; }
+            for e in $(yq -r ".\"$p\".environments // [\"staging\", \"production\"] | .[]" projects.yaml); do
+              grep -qxE '[a-z0-9]+' <<<"$e" || { echo "::error file=terraform/openbao/projects.yaml::$p: environment '$e': lowercase letters and digits only"; ok=false; }
             done
           done
           $ok
