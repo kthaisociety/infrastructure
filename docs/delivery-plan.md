@@ -37,7 +37,7 @@ GitHub App) on hold: onboarding-service moves straight to this model instead.
 | Changes | Rare, reviewed by infra admins | Frequent: tag bumps by a bot, project config by PR |
 | Who writes | Humans, by PR | Humans by PR; the deploy bot through its own PRs, which only change image files |
 | CI's OpenBao rights | `terraform`: everything | Minting tokens through `dokploy-provider` (which only grants existing `dokploy-project-*` policies), and nothing else: no policies, no secrets, no other token role |
-| CI's Dokploy rights | Admin API key | A key for its own `member` Dokploy user, `Deployments CI` (`ops+dokploy-deployments@kthais.com`), limited to project resources (open question 3) |
+| CI's Dokploy rights | Admin API key | A key for its own Dokploy user, `Deployments CI` (`ops+dokploy-deployments@kthais.com`), also an admin: members can't use vault providers (open question 3) |
 
 Why split:
 - **Permissions.** The deploy bot needs to change `main` without a human review. In `infrastructure`
@@ -290,11 +290,14 @@ No GHCR pull account: images are public (see "Builds").
 1. ~~Private or public images.~~ **Public** (2026-10-02; first decided private, reversed the same day
    when the repos went public by design).
 2. ~~A machine GitHub account.~~ **Not needed**: it was only for pulling private images.
-3. **Dokploy permissions for `deployments`.** Decided: its own `member` Dokploy user, `Deployments CI`, with
-   create projects/services/environments and API access, and no access to the `infrastructure`
-   project. Not tested ahead (decided 2026-10-02): whether a member can create vault providers. The
-   first apply in step 2 shows it; if it can't, `Deployments CI` becomes an admin, and the split then
-   protects OpenBao's config but not Dokploy's settings.
+3. ~~Dokploy permissions for `deployments`.~~ **Admin** (2026-10-02). Its own user, `Deployments CI`,
+   started as a `member`; its first apply (deployments#1) showed members can't use vault providers at
+   all (`vaultProvider.testConnection`: "unauthorized to access resource vaultProvider", 401). Dokploy's
+   custom roles can grant exactly that, but need a paid license. So it's an admin: the split between the
+   repos still protects OpenBao's configuration (`deployments-ci` only mints provider tokens), not
+   Dokploy's settings or the `infrastructure` project. Both repos' `main` are equally gated (PRs, checks
+   nobody bypasses, code-owner review), and the deploy bot is limited to `release.yaml` lines. Revisit
+   with a custom role if the license ever comes.
 4. ~~Staging.~~ **Every project has `staging` and `production` by default** (2026-10-02). A per-project
    switch to skip staging can come later, when a project needs it; the flow already handles a project
    without staging. onboarding-service goes first and exercises both deploy paths, the promotion gate,
