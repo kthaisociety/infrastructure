@@ -1,0 +1,104 @@
+# App delivery: from a push to running on Dokploy
+
+_Outline, 2026-10-02. The design is in [delivery-plan.md](delivery-plan.md); this is the guide to using
+it. Each section is filled in by the step that builds it (marked **[step n]**) and checked against the
+real system before it's called done. Until then, treat anything here as intended, not as fact._
+
+Every app has two environments, `staging` and `production`. Merging to `main` deploys to staging.
+Merging the release PR deploys to production. Nothing else deploys.
+
+```
+feature PR ──merge──▶ build ──▶ sha-<commit> ──deploy.yml──▶ staging
+                         └─▶ release PR updated (next version + changelog)
+release PR ──merge (code owner)──▶ vX.Y.Z + GitHub Release
+                         ├─▶ build ──▶ sha-<release commit> ──deploy.yml──▶ staging
+                         └─▶ release: wait for that build ──▶ X.Y.Z = same digest ──deploy.yml──▶ production
+```
+
+## 1. The pieces
+
+**[step 1–5]** One short paragraph each: what it is, where it lives, what it may do.
+
+- **App repo** (e.g. `kthaisociety/onboarding-service`): the code, `CHANGELOG.md`, the version
+  (release-please's manifest), and three small workflow files that call `kthaisociety/workflows`.
+- **`kthaisociety/workflows`**: the reusable workflows. `semantic-pr`, `build`, `release`.
+- **GHCR** (`ghcr.io/kthaisociety/<project>`): the images. Private; each package writable only by its
+  own repo.
+- **`kthaisociety/deployments`**: per project, `project.yaml` (config, secret names) and `release.yaml`
+  (the exact image per environment), and `deploy.yml`.
+- **OpenBao** (`bao.kthais.com`): secret values, at `secret/<project>/<environment>`.
+- **Dokploy**: runs the images. Never builds, never decides what runs.
+- **Bots**: release App, trigger App, deploy App, `cicd-bot`, GHCR pull account (see
+  [bot-accounts.md](bot-accounts.md)).
+
+## 2. Adding a new app
+
+A checklist, in order, with who does each step and what "done" looks like.
+
+### 2.1 In the app repo **[step 2]**
+- Dockerfile (or whatever builds an image); the app reads all config from env.
+- `.github/workflows/`: `pr.yml` (semantic title), `build.yml`, `release.yml`, each a few lines calling
+  `kthaisociety/workflows@<tag>`.
+- `release-please-config.json` and `.release-please-manifest.json` (start at `0.1.0` or the current version).
+- `CODEOWNERS`: who approves releases.
+- Ruleset on `main`: PRs only, squash only, signed commits, required checks (title, tests); release PR
+  requires a code owner.
+- Install the release App and the trigger App on the repo.
+
+### 2.2 In `deployments` **[step 4]**
+- `projects/<project>/project.yaml`: image name, port, domain (if any), volumes, non-secret env and
+  secret names per environment.
+- PR, merge: creates the Dokploy project with `staging` and `production`, a vault provider per
+  environment, the empty secret paths, the apps (not deployed: no image yet).
+
+### 2.3 Secrets **[step 4]**
+- In the OpenBao UI or CLI: `secret/<project>/staging` and `secret/<project>/production`, every name from
+  `project.yaml`. `put` once, `patch` after; values through the clipboard, never as arguments.
+- Decide what staging's secrets are: real-but-separate credentials, or inert ones (onboarding-service).
+
+### 2.4 DNS, if the app has a domain **[step 6]**
+- `dnscontrol` PR for each host (staging and production).
+
+### 2.5 First deploy **[step 5]**
+- Merge anything to `main` (or re-run `build`): the first image goes to staging.
+- First release: merge the release PR. Production gets its first image.
+
+## 3. Day to day
+
+### 3.1 A change, to staging **[step 5]**
+What runs, in order, and what each check proves: PR checks → squash merge → `build` (test, image
+`sha-<commit>`, push) → `deploy.yml` (digest lookup, bot PR on `release.yaml`, `bot-scope`, merge,
+apply) → staging redeploys → `build` goes green.
+
+### 3.2 A release, to production **[step 5]**
+Reviewing the release PR (version, changelog) → merge by a code owner → tag and GitHub Release →
+release commit built and on staging → `X.Y.Z` added to that digest → `deploy.yml` (Release exists,
+digest matches) → production redeploys → `release` goes green.
+
+### 3.3 Changing config or secrets **[step 4]**
+- Non-secret env, volumes, domains: a PR to `project.yaml`.
+- Secret values: OpenBao, then a redeploy (a changed secret takes effect only on the next deploy). How
+  to redeploy without a new image.
+
+## 4. Rolling back **[step 5]**
+- Production: revert the `release.yaml` commit in `deployments` (the previous image comes back), or
+  release a fix. What not to do (re-tagging, editing in the Dokploy UI).
+- Staging: the next merge replaces it; or revert as above.
+
+## 5. When something fails **[step 5–7]**
+A table: symptom → which run to open → likely cause → fix. At least:
+- Title check fails on a PR.
+- `build` fails (tests, image push).
+- Release PR doesn't appear or has no checks (release App).
+- `deploy.yml` rejects the request (unknown project/environment, tag missing, digest mismatch).
+- Bot PR fails `bot-scope` or other checks.
+- Apply fails: vault reference doesn't resolve (missing key), image pull denied (GHCR credential),
+  deploy timeout, Dokploy API key.
+- App deployed but unhealthy.
+- OpenBao provider token expired (weekly apply missed).
+
+## 6. Reference **[step 7]**
+- Every file an app repo has, and every file `deployments` has for it, with an example.
+- Every workflow, its trigger, and the permissions it runs with.
+- Image tags: `sha-<short>` (every build), `X.Y.Z` (releases); always pinned by digest in `release.yaml`.
+- Secret reference format: `${{vault.<project>-<env>.<project>/<env>:KEY}}`, written by `modules/project`.
