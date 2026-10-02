@@ -102,8 +102,9 @@ open question 5):
 3. Merging creates a new commit on `main` (the squash of the release PR), tags it `vX.Y.Z` and publishes
    a GitHub Release with the changelog.
 4. Promotion, in the release workflow, **only after the release commit is built and tested**:
-   - wait for the `build` run of the release commit to succeed, so `sha-<release commit>` exists;
-   - where the project has `staging`, wait until that digest is deployed to staging and its checks pass;
+   - wait for the `build` run of the release commit to succeed. For a project without staging that
+     means the image `sha-<release commit>` is pushed; with staging, also that it's deployed there and its
+     checks passed (the build waits for its own staging deploy, see "The deploy bot");
    - add the `X.Y.Z` tag to that digest, then request a `production` deploy of `X.Y.Z`.
 
    If the build or staging fails, nothing is promoted; the release exists in git, without an image.
@@ -155,7 +156,9 @@ staging: ghcr.io/kthaisociety/onboarding-service:sha-3f2c1ab@sha256:…
    finish.
 6. **The app's workflow waits for `deploy.yml`.** `deploy.yml`'s `run-name` contains the `request_id`, so
    the app workflow finds its own run (a dispatch doesn't return a run id), waits for it, and reports
-   its result. A release or build is only green once its image is running.
+   its result. So a build that deploys to staging is only green once that image runs there, and a
+   release only once it runs in production. A build of a project **without** staging deploys nothing:
+   it's green once the image is pushed.
 
 Rulesets on `deployments`' `main`: one ruleset with signatures, linear history and the required checks
 (`bot-scope` included), which nobody bypasses; a second one requiring a human approval, which only the
