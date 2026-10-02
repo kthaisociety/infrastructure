@@ -324,6 +324,10 @@ manage by hand.
   passes them to `dokploy_vault_provider` as `token_wo`. Tokens are in both states, which are encrypted.
 
 ### Apps run images built by their own repos, deployed by this one
+_Being replaced (2026-10-02):_ [delivery-plan.md](delivery-plan.md) proposes a separate `deployments`
+repo, semantic commits, approved semver releases and digest-pinned images. The section below is the
+earlier design.
+
 _Decided 2026-09-30._ An app's own repo tests it, builds its image and pushes it to GHCR. This repo is
 the only deploy authority: it records which image each app runs, in git, and OpenTofu applies it.
 
@@ -764,6 +768,8 @@ For each project:
 5. Tell the project's maintainers that config changes now go through PRs here.
 
 ### Phase 8 — Deploys through this repo
+_Being replaced by [delivery-plan.md](delivery-plan.md), "Build order"._
+
 1. Create the deploy GitHub App (org-owned, installed on this repo only, `actions: write`). Its ID and
    private key become org secrets, available to the repos named in the `project.yaml` files.
 2. Write `build.yml` (reusable, called by app repos: test, build, push to GHCR, dispatch) and
