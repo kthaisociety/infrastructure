@@ -29,23 +29,38 @@ GitHub App) on hold: onboarding-service moves straight to this model instead.
 |---|---|---|
 | Holds | The platform: GleSYS storage, OpenBao (its deployment, auth methods, admin policies, KV mount, token role, snapshots), Dokploy core (registry credentials, backup destination, notifications) | Every project: `project.yaml`, the image each environment runs, `modules/project` and `modules/project-secrets` |
 | Changes | Rare, reviewed by infra admins | Frequent: tag bumps by a bot, project config by PR |
-| Who writes | Humans, by PR | Humans by PR; the deploy bot directly to its image files |
-| CI's OpenBao rights | `terraform`: everything | Only what projects need: `dokploy-project-*` policies, tokens from the `dokploy-provider` role, secret **metadata** (empty paths). Never secret values |
+| Who writes | Humans, by PR | Humans by PR; the deploy bot through its own PRs, which only change image files |
+| CI's OpenBao rights | `terraform`: everything | Only what projects need: `dokploy-project-*` policies, tokens from the `dokploy-provider` role, secret **metadata** (empty paths). Not `infrastructure/*`, auth methods, admin policies or the token role |
 | CI's Dokploy rights | Admin API key | A key for its own non-admin Dokploy user, `cd-bot`, limited to project resources (open question 3) |
 
 Why split:
-- **Permissions.** The deploy bot needs to commit to `main` without review. In `infrastructure` that would
-  sit next to OpenBao's auth config and the admin policy. In `deployments` the worst a bad commit does is
-  run a different image of an existing project.
-- **Blast radius of CI.** `infrastructure`'s OpenBao login can do anything, which is why it never plans
-  on PRs. `deployments`' login can't read a single secret value, so its PRs can get real plans.
+- **Permissions.** The deploy bot needs to change `main` without a human review. In `infrastructure`
+  that would sit next to OpenBao's auth config and the admin policy. In `deployments` the worst a bad bot
+  change does is run a different, already-built image of an existing project.
+- **Blast radius of CI.** `infrastructure`'s OpenBao login can do anything. `deployments`' login can't
+  touch OpenBao's auth, admin policies or `infrastructure/*`. **It can still read every project's
+  secrets, indirectly:** it can mint a token from `dokploy-provider` with any `dokploy-project-*` policy,
+  and those policies read secret data. So its PR plans stay behind the `plan` environment's reviewer
+  gate, as today (open question 7), and its `production` login is limited to `main`.
 - **Noise.** Tag bumps would bury platform changes in `infrastructure`'s history.
 
 What moves from `infrastructure` to `deployments`: `terraform/projects/`, `modules/project`,
 `modules/project-secrets`, the `module "project_secrets"` and shared-path parts of `terraform/openbao`,
 and `terraform/dokploy/projects.tf`. `infrastructure` keeps the `dokploy-provider` token role and the
-`infrastructure-production` provider. The move is done with `tofu state mv` into the new state (or
-`removed` + `import` blocks), so nothing is recreated: policies and tokens keep working.
+`infrastructure-production` provider.
+
+How the move keeps everything working:
+- **Policies, empty secret paths, Dokploy projects, apps and vault providers** move without being
+  recreated: `removed { lifecycle { destroy = false } }` in `infrastructure`, `import` blocks in
+  `deployments`. Both plans must show no destroy and no replace for these.
+- **Provider tokens are re-minted, not moved.** A `vault_token` can't be imported with its value (import
+  goes by accessor, and the resource then plans a replacement). So `deployments` mints new tokens, and
+  each imported `dokploy_vault_provider` gets its new token on the same apply (its `token_wo_version`
+  comes from the token's hash). Only after that apply succeeds does `infrastructure` drop the old tokens
+  (plain removal, which revokes them). Order: `deployments` apply first, `infrastructure` second.
+- **Token renewal moves too.** `deployments` gets its own weekly scheduled apply, like `infrastructure`'s
+  today. Without it, its tokens expire 32 days after the last apply and every deploy that resolves
+  secrets fails. It's in place before the old tokens are dropped.
 
 `deployments` is one root module with both providers (OpenBao and Dokploy), so a project's policy,
 token, vault provider and app are created in one apply, in order. That removes the "new project has no
@@ -60,7 +75,8 @@ Every app repo (and both infra repos) uses [Conventional Commits](https://www.co
 - PRs are squash-merged, so the PR title becomes the commit on `main`. A required check validates the
   title (e.g. `amannn/action-semantic-pull-request`).
 - The check is one reusable workflow, called from every repo, so the rules live in one place.
-- Rulesets on `main` require the check, linear history and squash merges.
+- Rulesets on `main` require the check, linear history and squash merges. No direct pushes to `main`,
+  for bots either: the deploy bot goes through PRs too (see "The deploy bot").
 
 ### Versions: digests for development and staging, semver for production
 
@@ -72,8 +88,8 @@ Every app repo (and both infra repos) uses [Conventional Commits](https://www.co
 - **Every image reference is pinned by digest**: `ghcr.io/kthaisociety/<project>:1.4.0@sha256:…`. A tag can
   be moved; a digest can't. The tag is there for humans.
 - **Releases promote, they don't rebuild.** The `X.Y.Z` tag is added to the digest that was already
-  built from that commit (and ran on staging, if the project has one), so production runs exactly the
-  bytes that were tested.
+  built from the release commit, so production runs exactly those bytes. Promotion waits for that build,
+  and for staging where the project has one (see "Releases", step 4).
 
 ### Releases: a release PR that code owners approve
 
@@ -83,9 +99,14 @@ open question 5):
 1. As `feat:`/`fix:` commits land on `main`, the release bot keeps one open **release PR**: the next
    version (from the commit types) and the `CHANGELOG.md` entries.
 2. A code owner (`CODEOWNERS`, required review on the release PR) merges it when they want a release.
-3. Merging tags `vX.Y.Z` and publishes a GitHub Release with the changelog.
-4. The tag triggers promotion: the `X.Y.Z` image tag on the existing digest, then a deploy request for
-   `production`.
+3. Merging creates a new commit on `main` (the squash of the release PR), tags it `vX.Y.Z` and publishes
+   a GitHub Release with the changelog.
+4. Promotion, in the release workflow, **only after the release commit is built and tested**:
+   - wait for the `build` run of the release commit to succeed, so `sha-<release commit>` exists;
+   - where the project has `staging`, wait until that digest is deployed to staging and its checks pass;
+   - add the `X.Y.Z` tag to that digest, then request a `production` deploy of `X.Y.Z`.
+
+   If the build or staging fails, nothing is promoted; the release exists in git, without an image.
 
 The changelog and the version live in the app's repo; the deployments repo only records which version
 runs where.
@@ -113,27 +134,43 @@ staging: ghcr.io/kthaisociety/onboarding-service:sha-3f2c1ab@sha256:…
 ```
 
 1. An app's workflow (build for staging, release for production) triggers `deployments`' `deploy.yml`
-   (`workflow_dispatch`: project, environment, image with digest).
-2. `deploy.yml` checks the request: the project and environment exist; the digest exists in that
-   project's GHCR package; for `production`, the tag is a semver tag with a GitHub Release in the
-   project's repo.
-3. It commits the new line to `release.yaml` on `main` through the GitHub API (commits made that way are
-   signed by GitHub, which the `main` ruleset requires), then applies in the same run, in one
-   concurrency group.
-4. The image change redeploys the app; a failed deploy fails the run, which the app repo sees.
+   (`workflow_dispatch`: project, environment, **tag**). The request carries no digest.
+2. `deploy.yml` checks the request and **resolves the digest itself**:
+   - the project and environment exist in `project.yaml`;
+   - the tag exists in that project's GHCR package, and `deploy.yml` reads the digest it points to from
+     the registry. The caller can't pair an approved tag with other bytes, because it never names the
+     bytes;
+   - for `production`: the tag is `X.Y.Z`, the project's repo has a GitHub Release `vX.Y.Z`, and the
+     digest equals the one tagged `sha-<release commit>` (the commit `vX.Y.Z` points to).
+3. It opens a PR that changes only that project's line in `release.yaml`, with a semantic title
+   (`deploy(onboarding-service): production 1.4.0`). The required checks run on it, plus one more:
+   `bot-scope`, which fails if a bot PR touches anything but `projects/*/release.yaml`. When they pass,
+   the deploy App merges it (squash; GitHub signs the merge commit).
+4. The merge to `main` applies, in one concurrency group. The image change redeploys the app; a failed
+   deploy fails the run, which the app repo sees.
+
+Rulesets on `deployments`' `main`: one ruleset with signatures, linear history and the required checks
+(`bot-scope` included), which nobody bypasses; a second one requiring a human approval, which only the
+deploy App bypasses. So the bot skips review, never the checks, and only for image lines.
 
 OpenTofu reads the image from `release.yaml` and doesn't ignore any part of it: what's in git is what
 runs, and a manual redeploy of some other image is drift the next apply undoes.
 
-The trigger credential: one org-owned GitHub App with `actions: write` on `deployments` only, its key
-an org secret for app repos. It can start deploys of existing images and nothing else.
+Two credentials, kept apart:
+- **Trigger:** one org-owned GitHub App with `actions: write` on `deployments` only, its key an org secret
+  for app repos. It can ask for a deploy of an existing tag and nothing else; `deploy.yml` does the
+  checking.
+- **Deploy App:** used only inside `deployments`' own workflow, to open and merge the bot PRs
+  (`contents` and `pull-requests: write` on `deployments`). Its key never leaves that repo.
 
 ## Build order
 
 1. **This plan**, reviewed. Questions 1–3 are answered; check question 3 against Dokploy's permissions.
 2. **`deployments` repo**: repo, rulesets, `production`/`plan` environments, its own OpenBao JWT role and
-   policy (made in `infrastructure`), its Dokploy key. Move the project parts out of `infrastructure`
-   with state moves, and confirm an empty plan in both repos.
+   policy (made in `infrastructure`), its Dokploy key, its weekly apply. Move the project parts out of
+   `infrastructure` as in "How the move keeps everything working": `deployments` applies first
+   (imports, new tokens), then `infrastructure` (keeps the rest, revokes old tokens). Check both plans
+   show no destroy or replace outside the old tokens.
 3. **GHCR pull credential** as a Dokploy registry in `infrastructure` (verify item 4: does a registry
    alone let Dokploy pull, or does each app need it set).
 4. **Reusable workflows**: semantic PR titles, build, release. Then onboarding-service adopts them:
@@ -159,6 +196,8 @@ an org secret for app repos. It can start deploys of existing images and nothing
 6. **Where reusable workflows live**: in `deployments`, or a separate `kthaisociety/workflows` repo that
    every app repo can call. Private repos can only call workflows from repos that allow it (an org
    setting).
-7. **PR plans in `deployments`.** Its OpenBao policy can't read secret values, but a plan still reads the
-   provider tokens it manages. Either a separate read-only role for PRs, or PR plans in the `plan`
-   environment with a reviewer gate, as today.
+7. **PR plans in `deployments`.** Its CI login can mint tokens that read project secrets (see "Two repos"),
+   so it can't be handed to unreviewed PR code. Default: PR plans in the `plan` environment behind a
+   reviewer, as in `infrastructure`. Option: a separate PR role whose policy can read policies and look
+   up tokens but not create tokens or write policies. Bot PRs then need a reviewer for their plan, or
+   skip the plan (they only change an image line).
