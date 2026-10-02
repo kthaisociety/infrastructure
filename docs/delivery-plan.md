@@ -30,44 +30,43 @@ GitHub App) on hold: onboarding-service moves straight to this model instead.
 
 | | `infrastructure` (this repo) | `deployments` (new) |
 |---|---|---|
-| Holds | The platform: GleSYS storage, OpenBao (its deployment, auth methods, admin policies, KV mount, token role, snapshots), Dokploy core (backup destination, notifications) | Every project: `project.yaml`, the image each environment runs, `modules/project` and `modules/project-secrets` |
+| Holds | The platform: GleSYS storage, OpenBao (its deployment, auth methods, all policies including each project's, the empty secret paths, KV mount, token roles, snapshots), Dokploy core (backup destination, notifications) | Every project's Dokploy side: `project.yaml`, the image each environment runs, `modules/project`, and the provider tokens it mints for its vault providers |
 | Changes | Rare, reviewed by infra admins | Frequent: tag bumps by a bot, project config by PR |
 | Who writes | Humans, by PR | Humans by PR; the deploy bot through its own PRs, which only change image files |
-| CI's OpenBao rights | `terraform`: everything | Only what projects need: `dokploy-project-*` policies, tokens from the `dokploy-provider` role, secret **metadata** (empty paths). Not `infrastructure/*`, auth methods, admin policies or the token role |
-| CI's Dokploy rights | Admin API key | A key for its own non-admin Dokploy user, `cicd-bot`, limited to project resources (open question 3) |
+| CI's OpenBao rights | `terraform`: everything | Minting tokens through `dokploy-provider` (which only grants existing `dokploy-project-*` policies), and nothing else: no policies, no secrets, no other token role |
+| CI's Dokploy rights | Admin API key | A key for its own `member` Dokploy user, `Deployments CI` (`ops+dokploy-deployments@kthais.com`), limited to project resources (open question 3) |
 
 Why split:
 - **Permissions.** The deploy bot needs to change `main` without a human review. In `infrastructure`
   that would sit next to OpenBao's auth config and the admin policy. In `deployments` the worst a bad bot
   change does is run a different, already-built image of an existing project.
-- **Blast radius of CI.** `infrastructure`'s OpenBao login can do anything. `deployments`' login can't
-  touch OpenBao's auth, admin policies or `infrastructure/*`. **It can still read every project's
-  secrets, indirectly:** it can mint a token from `dokploy-provider` with any `dokploy-project-*` policy,
-  and those policies read secret data. So its PR plans stay behind the `plan` environment's reviewer
-  gate, as today (open question 7), and its `production` login is limited to `main`.
+- **Blast radius of CI.** `infrastructure`'s OpenBao login can do anything. `deployments`' login can
+  only mint provider tokens. **Policies stay in `infrastructure`**, because a policy's contents, not its
+  name, decide what its tokens read: a CI that could write `dokploy-project-*` policies could write one
+  granting everything and mint a token with it (Greptile on #16). The infrastructure project's policy is
+  outside the `dokploy-project-*` glob, with its own token role, so `deployments` can't reach
+  `infrastructure/*` either. **It can still read every app's secrets, indirectly**, by minting a token
+  with a project's policy: inherent to wiring Dokploy's providers. So its login is bound to `production`
+  (main only) and `plan` (PR plans, after a reviewer approves the run; open question 7).
 - **Noise.** Tag bumps would bury platform changes in `infrastructure`'s history.
 
-What moves from `infrastructure` to `deployments`: `terraform/projects/`, `modules/project`,
-`modules/project-secrets`, the `module "project_secrets"` and shared-path parts of `terraform/openbao`,
-and `terraform/dokploy/projects.tf`. `infrastructure` keeps the `dokploy-provider` token role and the
-`infrastructure-production` provider.
+What stays in `infrastructure` (decided after Greptile on #16): each project's OpenBao side,
+`modules/project-secrets`, now policy and empty secret paths only, from a project list in
+`terraform/openbao`. Adding a project is one line there, then its folder in `deployments`. What moves to
+`deployments`: the provider tokens (minted there) and everything Dokploy (`modules/project`).
 
 How the move keeps everything working:
-- **Policies, empty secret paths, Dokploy projects, apps and vault providers** move without being
-  recreated: `removed { lifecycle { destroy = false } }` in `infrastructure`, `import` blocks in
-  `deployments`. Both plans must show no destroy and no replace for these.
-- **Provider tokens are re-minted, not moved.** A `vault_token` can't be imported with its value (import
-  goes by accessor, and the resource then plans a replacement). So `deployments` mints new tokens, and
-  each imported `dokploy_vault_provider` gets its new token on the same apply (its `token_wo_version`
-  comes from the token's hash). Only after that apply succeeds does `infrastructure` drop the old tokens
-  (plain removal, which revokes them). Order: `deployments` apply first, `infrastructure` second.
+- **Dokploy projects, apps and vault providers** don't exist in OpenTofu yet (#9 was closed), so
+  there's nothing to move: `deployments` creates them.
+- **Provider tokens are re-minted, not moved.** A `vault_token` can't be imported with its value. So
+  `deployments` mints new tokens for its vault providers, and `infrastructure` then drops its own (plain
+  removal, which revokes them). Nothing uses the old ones yet.
 - **Token renewal moves too.** `deployments` gets its own weekly scheduled apply, like `infrastructure`'s
   today. Without it, its tokens expire 32 days after the last apply and every deploy that resolves
   secrets fails. It's in place before the old tokens are dropped.
 
-`deployments` is one root module with both providers (OpenBao and Dokploy), so a project's policy,
-token, vault provider and app are created in one apply, in order. That removes the "new project has no
-token on the PR plan" problem the two-root setup has.
+`deployments` is one root module with both providers (OpenBao and Dokploy), so a project's token,
+vault provider and app are created in one apply, in order.
 
 **Its state shares `infrastructure`'s bucket, under its own passphrase** (decided 2026-10-02):
 `kthais-tfstate`, key `deployments/terraform.tfstate`, the same CI credential, and **a different
@@ -195,11 +194,9 @@ Two credentials, kept apart:
 
 1. **This plan**, reviewed (#10, merged 2026-10-02). Questions 1–3 are answered.
 2. **`deployments` repo**: repo, rulesets, `production`/`plan` environments, its own OpenBao JWT role and
-   policy (made in `infrastructure`), its Dokploy key, its weekly apply. Move the project parts out of
-   `infrastructure` as in "How the move keeps everything working": `deployments` applies first
-   (imports, new tokens), then `infrastructure` (keeps the rest, revokes old tokens). Check both plans
-   show no destroy or replace outside the old tokens. The first apply is also the test of open
-   question 3: if `cicd-bot` can't create a vault provider, it fails there.
+   policy (made in `infrastructure`), its Dokploy key, its weekly apply. `deployments` mints the tokens
+   and creates the Dokploy side; then `infrastructure` drops its own provider tokens. The first apply is
+   also the test of open question 3: if `Deployments CI` can't create a vault provider, it fails there.
 3. ~~GHCR pull credential~~: not needed, images are public. Verify instead that Dokploy pulls a public
    GHCR image with no registry set (verify item 4, reworded).
 4. **Reusable workflows**: semantic PR titles, build, release. Then onboarding-service adopts them:
@@ -249,7 +246,7 @@ refuses otherwise; a re-run of an old apply then does nothing.
 
 | Identity | Kind | Used for | Created in step |
 |---|---|---|---|
-| `cicd-bot` | Dokploy user, `member` role, API key | `deployments`' applies | 2 |
+| `Deployments CI` | Dokploy user, `member` role, API key | `deployments`' applies | 2 |
 | `deployments` CI login | OpenBao JWT role (in `infrastructure`) | `deployments`' OpenBao changes | 2 (as code) |
 | `kthais-release` (created 2026-10-02) | GitHub App, org-owned; `contents`, `pull-requests`, `issues: write`; installed on selected app repos; org secrets `RELEASE_APP_*` for those repos | release-please's release PRs, so their checks run | 4 |
 | `kthais-dispatch` (created 2026-10-02) | GitHub App, org-owned; `actions: write`; installed on `deployments` only; org secrets `DISPATCH_APP_*` for the app repos | App repos requesting deploys | 5 |
@@ -262,10 +259,10 @@ No GHCR pull account: images are public (see "Builds").
 1. ~~Private or public images.~~ **Public** (2026-10-02; first decided private, reversed the same day
    when the repos went public by design).
 2. ~~A machine GitHub account.~~ **Not needed**: it was only for pulling private images.
-3. **Dokploy permissions for `deployments`.** Decided: its own `member` Dokploy user, `cicd-bot`, with
+3. **Dokploy permissions for `deployments`.** Decided: its own `member` Dokploy user, `Deployments CI`, with
    create projects/services/environments and API access, and no access to the `infrastructure`
    project. Not tested ahead (decided 2026-10-02): whether a member can create vault providers. The
-   first apply in step 2 shows it; if it can't, `cicd-bot` becomes an admin, and the split then
+   first apply in step 2 shows it; if it can't, `Deployments CI` becomes an admin, and the split then
    protects OpenBao's config but not Dokploy's settings.
 4. ~~Staging.~~ **Every project has `staging` and `production` by default** (2026-10-02). A per-project
    switch to skip staging can come later, when a project needs it; the flow already handles a project

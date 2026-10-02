@@ -5,6 +5,12 @@ variable "project" {
     condition     = can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", var.project))
     error_message = "Project names are lowercase letters, digits and single hyphens."
   }
+  # A project named like these would get a dokploy-project-* policy on secret/infrastructure/* or
+  # secret/shared/*, which deployments' CI can mint tokens for.
+  validation {
+    condition     = var.policy_prefix != "dokploy-project-" || !contains(["infrastructure", "shared"], var.project)
+    error_message = "\"infrastructure\" and \"shared\" aren't project names: they're secret paths of their own."
+  }
 }
 
 variable "environment" {
@@ -39,4 +45,10 @@ variable "create_path" {
   description = "Create the empty <project>/<environment> path. False when OpenTofu writes the path itself."
   type        = bool
   default     = true
+}
+
+variable "policy_prefix" {
+  description = "Policy name prefix. Projects use dokploy-project-, which kthaisociety/deployments' CI may mint tokens for; the infrastructure project uses its own prefix and token role, out of that CI's reach."
+  type        = string
+  default     = "dokploy-project-"
 }

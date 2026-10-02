@@ -1,20 +1,18 @@
-# kthaisociety/deployments' CI login. It manages projects' OpenBao side (modules/project-secrets there):
-# their policies, their Dokploy provider tokens and their empty secret paths. Nothing else: not auth
-# methods, admin policies, the token role or infrastructure/*, and never secret values.
+# kthaisociety/deployments' CI login. It mints each project's Dokploy provider token, through the
+# dokploy-provider role, and does nothing else in OpenBao. In particular it can't write policies: a
+# dokploy-project-* policy's contents decide what a token minted with it can read, so those policies,
+# and the projects' empty secret paths, are written only by this repo (projects.tf).
 #
-# It can still read project secrets indirectly, by minting a dokploy-provider token with a project policy
-# (docs/delivery-plan.md, "Two repos"); that's why its login is limited to deployments' production
-# environment, which only runs on main.
+# What it can still do: mint a token with any project's policy, and so read app secrets. That's inherent
+# to wiring Dokploy's providers, and why the login is bound to deployments' production environment (main
+# only) and its plan environment (PR plans, after a reviewer approves the run). It can't reach
+# infrastructure/* (separate role and policy, main.tf) or anything admin.
 
 resource "vault_policy" "deployments" {
   name   = "deployments"
   policy = <<-EOT
-    # Project policies only.
-    path "sys/policies/acl/dokploy-project-*" {
-      capabilities = ["create", "read", "update", "delete", "list"]
-    }
-
-    # Provider tokens, only through the dokploy-provider role (which only grants dokploy-project-*).
+    # Provider tokens, only through dokploy-provider, which only grants existing dokploy-project-*
+    # policies (written by kthaisociety/infrastructure).
     path "auth/token/create/dokploy-provider" {
       capabilities = ["create", "update"]
     }
@@ -32,14 +30,14 @@ resource "vault_policy" "deployments" {
       capabilities = ["update"]
     }
 
-    # Empty secret paths: metadata only, never data.
-    path "secret/metadata/*" {
-      capabilities = ["create", "read", "update", "list"]
-    }
-    path "secret/metadata/infrastructure/*" {
+    # Explicitly never: policies, other token roles, secrets.
+    path "sys/policies/*" {
       capabilities = ["deny"]
     }
-    path "secret/data/*" {
+    path "auth/token/create/dokploy-provider-infrastructure" {
+      capabilities = ["deny"]
+    }
+    path "secret/*" {
       capabilities = ["deny"]
     }
   EOT
@@ -51,9 +49,15 @@ resource "vault_jwt_auth_backend_role" "deployments_ci" {
   role_type       = "jwt"
   user_claim      = "sub"
   bound_audiences = ["https://bao.kthais.com"]
-  # kthaisociety/deployments' production environment (main only), immutable subject: owner and repo ids.
-  # Check the form with: gh api repos/kthaisociety/deployments/actions/oidc/customization/sub
-  bound_claims   = { sub = "repo:kthaisociety@57193069/deployments@1402092754:environment:production" }
+  # kthaisociety/deployments' production (main only) and plan (reviewer-approved PR plans) environments,
+  # immutable subject: owner and repo ids. Check the form with:
+  #   gh api repos/kthaisociety/deployments/actions/oidc/customization/sub
+  bound_claims = {
+    sub = join(",", [
+      "repo:kthaisociety@57193069/deployments@1402092754:environment:production",
+      "repo:kthaisociety@57193069/deployments@1402092754:environment:plan",
+    ])
+  }
   token_policies = [vault_policy.deployments.name]
   token_ttl      = 1800
   token_max_ttl  = 3600
