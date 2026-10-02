@@ -78,12 +78,19 @@ Merge. Check:
 
 Nothing calls staging: it stays idle.
 
-### 5. First release
+### 5. First release — done (v1.0.0, 2026-10-02)
+Released through #11, with the image `1.0.0` = `sha-04e1005`. Its tag was later moved to `v1.0.0`
+(release-please first tagged `onboarding-service-v1.0.0`; `include-component-in-tag: false` since #13).
+Lesson: never delete a release tag, release-please finds the previous release by it (#14 re-proposed
+1.0.0 until the tag was re-created).
 Squash-merge a PR in onboarding-service with `Release-As: 1.0.0` in the commit message (onboarding-service
 has no README: adding one is a good candidate). A code owner merges the release PR: `v1.0.0`, its GitHub
 Release, and `1.0.0` on the release commit's digest.
 
-### 6. Production: copy the database, then deploy
+### 6. Production — done (2026-10-03)
+Old app stopped (auto-deploy off), database copied, `production` deployed with the deploy workflow
+(`1.0.0`), callers switched to `onboarding-service-production-km3a0y:8000`, old records visible. Steps as
+done:
 On the host, in this order:
 ```sh
 # 1. Stop the old app (Dokploy → onboarding → service → Stop), so nothing writes while copying. Also turn
@@ -125,6 +132,10 @@ database is in use).
 
 Downtime: from stopping the old app (6.1) to the callers' redeploy (7), a few minutes. Nothing writes in
 between recruitment rounds.
+
+### Remaining
+- The `deploy-production` job in onboarding-service's `release.yml`, so releases deploy themselves.
+- Around 2026-10-10: step 8.
 
 ### 8. A week later
 Delete the old `onboarding` project in Dokploy, then its volume (`sudo docker volume rm
