@@ -234,8 +234,9 @@ Two credentials, kept apart:
 - **Domains:** `project.yaml` will declare them per environment, and `modules/project` will create the
   Dokploy domain (Traefik route, certificate). DNS stays a manual `dnscontrol` PR per host; later,
   `deployments` may open that PR itself when a new domain appears.
-- **Images follow their repo's visibility.** A GHCR package linked to a public repo is public; no
-  per-package step.
+- **Images are public; check each new package once.** Package visibility is separate from the repo's
+  (GitHub's documented default for new packages is private). onboarding-service's came out public with no
+  package step, but the new-app checklist verifies with a logged-out pull and switches it if needed.
 - **`vault_token` despite its deprecation warning:** a stable token per provider, renewed in place.
   An ephemeral token would be new on every apply and churn every Dokploy provider.
 - **OpenTofu 1.12.6 in both repos.** 1.13.1 came out 2026-10-01; upgrade both together, in one PR each.
@@ -296,9 +297,14 @@ No GHCR pull account: images are public (see "Builds").
    access resource vaultProvider", 401). Dokploy's
    custom roles can grant exactly that, but need a paid license. So it's an admin: the split between the
    repos still protects OpenBao's configuration (`deployments-ci` only mints provider tokens), not
-   Dokploy's settings or the `infrastructure` project. Both repos' `main` are equally gated (PRs, checks
-   nobody bypasses, code-owner review), and the deploy bot is limited to `release.yaml` lines. Revisit
-   with a custom role if the license ever comes.
+   Dokploy's settings or the `infrastructure` project. The gates in front of each repo's apply differ:
+   - `infrastructure` `main`: PRs only, required checks (`title`, `changes`, `fmt`, `openbao-validate`,
+     `Greptile Review`), no code-owner approval required; org admins bypass.
+   - `deployments` `main`: required checks nobody bypasses (`title`, `check`, `bot-scope`), and a
+     separate rule requiring a code owner's approval (plus `Greptile Review` and resolved threads),
+     which `kthais-deploy` and org admins bypass. `kthais-deploy`'s PRs are limited to one
+     `release.yaml` by `bot-scope`.
+   Revisit with a custom role if the license ever comes.
 4. ~~Staging.~~ **Every project has `staging` and `production` by default** (2026-10-02). A per-project
    switch to skip staging can come later, when a project needs it; the flow already handles a project
    without staging. onboarding-service goes first and exercises both deploy paths, the promotion gate,

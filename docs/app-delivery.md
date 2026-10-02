@@ -24,7 +24,7 @@ deploy is a one-line PR to the project's `release.yaml` in `deployments` (sectio
 |---|---|---|---|
 | App repo | e.g. `kthaisociety/onboarding-service` | code, `CHANGELOG.md`, version (release-please manifest), three workflow files calling `kthaisociety/workflows` | built (onboarding-service) |
 | `kthaisociety/workflows` | public, tags `v0.1.0`… | `semantic-pr.yml`, `build.yml`, `release.yml` (reusable). Must stay public: public repos can't call workflows from a private one | built |
-| GHCR | `ghcr.io/kthaisociety/<repo>` | the images. A package linked to a public repo is public: Dokploy pulls with no credentials. Writable only by its own repo | built |
+| GHCR | `ghcr.io/kthaisociety/<repo>` | the images, public: Dokploy pulls with no credentials. Writable only by its own repo. Check visibility once per new package (2.1) | built |
 | `kthaisociety/deployments` | public | per project `project.yaml` (config, secret names) and `release.yaml` (exact image per environment); OpenTofu that builds the Dokploy side | built (deployments#1); `deploy.yml` not yet |
 | `kthaisociety/infrastructure` | public | the platform, and each project's OpenBao side: one line in `terraform/openbao/projects.yaml` | built |
 | OpenBao | `bao.kthais.com` | secret values at `secret/<project>/<env>` and `secret/shared/<name>/<env>` | built |
@@ -67,8 +67,16 @@ In order. Each step says what "done" looks like.
   - `kthais-dispatch`: stays installed on `deployments` only; add the repo to `DISPATCH_APP_CLIENT_ID` /
     `DISPATCH_APP_PRIVATE_KEY`'s repository access the same way.
   - `kthais-deploy`: nothing.
-- **Done when:** a merge to `main` pushes `ghcr.io/kthaisociety/<repo>:sha-<7>`, which pulls logged out
-  (`docker pull …` or the registry API), and release-please has opened a release PR whose checks ran.
+- **After the first build, check the package is public** with a pull while logged out:
+  ```sh
+  docker logout ghcr.io; docker pull ghcr.io/kthaisociety/<repo>:sha-<7>
+  ```
+  If it's denied: org → Packages → `<repo>` → Package settings → Danger Zone → Change visibility →
+  Public. Package visibility is a setting of its own: GitHub's documented default for a new package is
+  private, though onboarding-service's came out public (its repo was public when it was first pushed,
+  2026-10-02). Check either way; it's once per package.
+- **Done when:** a merge to `main` pushes `ghcr.io/kthaisociety/<repo>:sha-<7>`, which pulls logged out,
+  and release-please has opened a release PR whose checks ran.
 
 ### 2.2 Its OpenBao side, in `infrastructure`
 - One line in `terraform/openbao/projects.yaml`: `my-app: {}` (staging and production), or
@@ -86,13 +94,15 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
   shared ones at `secret/shared/<name>/<env>`.
 - `put` for the first key on an empty path, `patch` after (a second `put` replaces the whole secret).
 - Values through stdin, never as arguments; long values from the clipboard (a terminal paste is cut at
-  1024 characters):
+  1024 characters). `printf '%s' "$(pbpaste)"` drops only trailing newlines (a copy often adds one) and
+  keeps internal ones, so multi-line values such as PEM keys arrive intact:
   ```sh
-  pbpaste | tr -d '\n' | bao kv put -mount=secret <project>/production KEY=-
-  pbpaste | tr -d '\n' | bao kv patch -mount=secret <project>/production OTHER=-
+  printf '%s' "$(pbpaste)" | bao kv put -mount=secret <project>/production KEY=-
+  printf '%s' "$(pbpaste)" | bao kv patch -mount=secret <project>/production OTHER=-
   pbcopy < /dev/null
   bao kv get -mount=secret -format=json <project>/production | jq '.data.data | map_values(length)'
   ```
+  Never `tr -d '\n'`: it would also remove a multi-line value's internal newlines.
 - Before the first write, a path shows "404" in the UI and CLI: it exists as metadata only. Normal.
 - **Staging's secrets:** separate from production's, never copies. Either real staging credentials, or
   **inert** ones when the app can act on real accounts (onboarding-service: a service-account JSON with no
@@ -178,8 +188,8 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 | Apply: `verify_connection` / vault provider error | `apply` run | Dokploy can't reach OpenBao or the token is wrong; check OpenBao is up and the provider token |
 | Apply: 403 from OpenBao | `apply` run | `deployments-ci`'s policy lacks a path, or the project isn't in `projects.yaml` (no policy) |
 | Deploy fails resolving a reference | Dokploy deploy log | the key isn't in OpenBao at that path → write it, redeploy |
-| Deploy fails pulling the image | Dokploy deploy log | wrong digest, or the package isn't public (the repo isn't public) |
-| Apps stop resolving secrets weeks later | Dokploy deploy log | provider token expired: the weekly apply didn't run → run `tofu` by hand |
+| Deploy fails pulling the image | Dokploy deploy log | wrong digest, or the package isn't public: check the package's own visibility (2.1), not only the repo's |
+| Apps stop resolving secrets weeks later | Dokploy deploy log | provider token expired (32 days without an apply): `kthaisociety/deployments` → Actions → **tofu** → Run workflow on `main`. Its apply renews every app's token, or mints a new one and pushes it to Dokploy if it had already expired. Verify: Dokploy → Settings → Secrets → the provider's Test connection, then redeploy the app. The `infrastructure-production` provider's token is renewed by `kthaisociety/infrastructure`'s **tofu** workflow instead. If the workflow itself fails, fix that first: there's no laptop apply. |
 | Warnings "Deprecated Resource vault_token" in plans | — | expected: we keep `vault_token` on purpose (a stable token per provider) |
 
 ## 6. Reference

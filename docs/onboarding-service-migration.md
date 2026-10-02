@@ -52,7 +52,7 @@ for the shared secret.
     | bao kv put -mount=secret onboarding-service/staging GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON=-
   printf 'staging-inert-not-a-token' | bao kv patch -mount=secret onboarding-service/staging MATTERMOST_BOT_TOKEN=-
   # Its own shared secret: staging and production can't call each other.
-  openssl rand -base64 32 | tr -d '\n' | bao kv put -mount=secret shared/onboarding-service-secret/staging ONBOARDING_SERVICE_SECRET=-
+  printf '%s' "$(openssl rand -base64 32)" | bao kv put -mount=secret shared/onboarding-service-secret/staging ONBOARDING_SERVICE_SECRET=-
   ```
   Lengths after: 404, 25, 44.
 
@@ -86,12 +86,20 @@ On the host, in this order:
 # 1. Stop the old app (Dokploy → onboarding → service → Stop), so nothing writes while copying. Also turn
 #    off its auto-deploy, or a push would start it again.
 # 2. Copy the database into the new app's volume, owned by the app's user (uid 10001, its Dockerfile):
-sudo docker volume ls | grep onboarding-service            # onboarding-service-data exists, by that exact name
+# The source must exist by that exact name: `docker run -v` would otherwise create it, empty, and the
+# copy would "succeed" with nothing in it.
+sudo docker volume inspect onboarding-service-data --format '{{.Name}} {{.Mountpoint}}' || { echo "no source volume: stop"; exit 1; }
 sudo docker run --rm \
   -v onboarding-service-data:/from:ro \
   -v onboarding-service-production-data:/to \
-  alpine sh -c 'cp -a /from/. /to/ && chown -R 10001:10001 /to && ls -ln /to'
+  alpine sh -c 'set -e
+    test -s /from/onboarding.db || { echo "no onboarding.db in the source: stop"; exit 1; }
+    cp -a /from/. /to/
+    chown -R 10001:10001 /to
+    cmp /from/onboarding.db /to/onboarding.db
+    ls -ln /to'
 ```
+It must end listing `onboarding.db` owned by `10001 10001`, with no "stop" and no `cmp` difference.
 SQLite needs to write in `/data` itself (journal files), hence the `chown` of the directory, not only the
 file. The `docker run` creates `onboarding-service-production-data`, which the new app's mount then uses.
 
