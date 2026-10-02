@@ -30,7 +30,7 @@ release PR ──merge (code owner)──▶ vX.Y.Z + GitHub Release
   (the exact image per environment), and `deploy.yml`.
 - **OpenBao** (`bao.kthais.com`): secret values, at `secret/<project>/<environment>`.
 - **Dokploy**: runs the images. Never builds, never decides what runs.
-- **Bots**: `kthais-release`, `kthais-dispatch`, `kthais-deploy` (GitHub Apps), `cicd-bot` (Dokploy) (see
+- **Bots**: `kthais-release`, `kthais-dispatch`, `kthais-deploy` (GitHub Apps), `Deployments CI` (Dokploy user) (see
   [bot-accounts.md](bot-accounts.md)).
 
 ## 2. Adding a new app
@@ -71,7 +71,10 @@ A checklist, in order, with who does each step and what "done" looks like.
 - **Ruleset on `main`** (copy onboarding-service's): PRs only, squash only, signed commits, linear
   history, all conversations resolved, required checks (title, tests, `Greptile Review`).
 
-### 2.2 In `deployments` **[step 4]**
+### 2.2 In `infrastructure`, then `deployments` **[step 4]**
+- `infrastructure` PR first: the project, its environments and shared secrets in `terraform/openbao`'s
+  project list. That writes its `dokploy-project-<project>-<env>` policies and empty secret paths.
+  Policies live here, not in `deployments`, because their contents decide what a token can read.
 - `projects/<project>/project.yaml`: image name, port, domain (if any), volumes, non-secret env and
   secret names per environment.
 - PR, merge: creates the Dokploy project with `staging` and `production`, a vault provider per
