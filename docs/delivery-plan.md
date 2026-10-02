@@ -134,7 +134,8 @@ staging: ghcr.io/kthaisociety/onboarding-service:sha-3f2c1ab@sha256:…
 ```
 
 1. An app's workflow (build for staging, release for production) triggers `deployments`' `deploy.yml`
-   (`workflow_dispatch`: project, environment, **tag**). The request carries no digest.
+   (`workflow_dispatch`: project, environment, **tag**, and a `request_id` it generates). The request
+   carries no digest.
 2. `deploy.yml` checks the request and **resolves the digest itself**:
    - the project and environment exist in `project.yaml`;
    - the tag exists in that project's GHCR package, and `deploy.yml` reads the digest it points to from
@@ -147,7 +148,14 @@ staging: ghcr.io/kthaisociety/onboarding-service:sha-3f2c1ab@sha256:…
    `bot-scope`, which fails if a bot PR touches anything but `projects/*/release.yaml`. When they pass,
    the deploy App merges it (squash; GitHub signs the merge commit).
 4. The merge to `main` applies, in one concurrency group. The image change redeploys the app; a failed
-   deploy fails the run, which the app repo sees.
+   deploy fails that apply run.
+5. **`deploy.yml` waits for that apply and ends with its result.** It finds the apply run by the merge
+   commit's SHA, waits for it to finish, and fails if the apply failed or never started. If the checks
+   on the bot PR fail, it closes the PR and fails too. So one `deploy.yml` run is one deploy, start to
+   finish.
+6. **The app's workflow waits for `deploy.yml`.** `deploy.yml`'s `run-name` contains the `request_id`, so
+   the app workflow finds its own run (a dispatch doesn't return a run id), waits for it, and reports
+   its result. A release or build is only green once its image is running.
 
 Rulesets on `deployments`' `main`: one ruleset with signatures, linear history and the required checks
 (`bot-scope` included), which nobody bypasses; a second one requiring a human approval, which only the
