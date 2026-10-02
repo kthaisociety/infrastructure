@@ -231,13 +231,20 @@ can stand in. It's stored in one place (the `production` environment), so switch
    project. Not tested ahead (decided 2026-10-02): whether a member can create vault providers. The
    first apply in step 2 shows it; if it can't, `cicd-bot` becomes an admin, and the split then
    protects OpenBao's config but not Dokploy's settings.
-4. **Staging.** Which projects get a `staging` environment, and on the same host? It doubles their
-   resource use.
-5. **Release tool.** release-please (release PR, changelog, works per language) or semantic-release
-   (releases on every merge, no approval step). The approval requirement points to release-please.
-6. **Where reusable workflows live**: in `deployments`, or a separate `kthaisociety/workflows` repo that
-   every app repo can call. Private repos can only call workflows from repos that allow it (an org
-   setting).
+4. ~~Staging.~~ **Only onboarding-service, as the test case** (2026-10-02). It exercises both deploy
+   paths, the promotion gate, per-environment secret paths and verify item 1 (a provider assigned per
+   environment), on a service where nothing depends on staging. Other projects go without until one
+   needs it. Staging's secrets are **inert**, so it has no power over real accounts:
+   - `GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON`: a dummy service account JSON with no real key. The app's
+     `googleworkspace.NewClient` only parses it at boot (the key is used on the first Google call), so
+     it starts, and any call to Google fails.
+   - `MATTERMOST_BOT_TOKEN`: a dummy value. The startup ping only logs a failure.
+   - `ONBOARDING_SERVICE_SECRET`: its own random value, so production and staging can't call each other.
+   - Non-secret env as production, with its own empty volume.
+5. ~~Release tool.~~ **release-please** (2026-10-02): the release PR is the approval step.
+6. ~~Where reusable workflows live.~~ **`kthaisociety/workflows`** (2026-10-02), its own repo: app repos
+   don't depend on the repo that holds deploy credentials, and pin the workflows by tag. Private repos
+   in the org need the org setting that lets them call its workflows.
 7. **PR plans in `deployments`.** Its CI login can mint tokens that read project secrets (see "Two repos"),
    so it can't be handed to unreviewed PR code. Default: PR plans in the `plan` environment behind a
    reviewer, as in `infrastructure`. Option: a separate PR role whose policy can read policies and look
