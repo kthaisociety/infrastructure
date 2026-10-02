@@ -99,7 +99,7 @@ Every app repo (and both infra repos) uses [Conventional Commits](https://www.co
 Per app repo, with [release-please](https://github.com/googleapis/release-please) (decided, open question
 5). One release PR per repo at a time: each merge to `main` creates it or adds to it, so any number of
 feature PRs end up in one release, and feature PRs never wait for it. release-please runs with the
-**release App**'s token, not `GITHUB_TOKEN`: GitHub runs no workflows for events made with
+**`kthais-release`** App's token, not `GITHUB_TOKEN`: GitHub runs no workflows for events made with
 `GITHUB_TOKEN`, so the release PR would never get its required checks and could never be merged.
 
 1. As `feat:`/`fix:` commits land on `main`, the release bot keeps one open **release PR**: the next
@@ -155,7 +155,7 @@ staging: ghcr.io/kthaisociety/onboarding-service:sha-3f2c1ab@sha256:…
 3. It opens a PR that changes only that project's line in `release.yaml`, with a semantic title
    (`deploy(onboarding-service): production 1.4.0`). The required checks run on it, plus one more:
    `bot-scope`, which fails if a bot PR touches anything but `projects/*/release.yaml`. When they pass,
-   the deploy App merges it (squash; GitHub signs the merge commit).
+   `kthais-deploy` merges it (squash; GitHub signs the merge commit).
 4. The merge to `main` applies, in one concurrency group. The image change redeploys the app; a failed
    deploy fails that apply run.
 5. **`deploy.yml` waits for that apply and ends with its result.** It finds the apply run by the merge
@@ -170,17 +170,18 @@ staging: ghcr.io/kthaisociety/onboarding-service:sha-3f2c1ab@sha256:…
 
 Rulesets on `deployments`' `main`: one ruleset with signatures, linear history and the required checks
 (`bot-scope` included), which nobody bypasses; a second one requiring a human approval, which only the
-deploy App bypasses. So the bot skips review, never the checks, and only for image lines.
+`kthais-deploy` bypasses. So the bot skips review, never the checks, and only for image lines.
 
 OpenTofu reads the image from `release.yaml` and doesn't ignore any part of it: what's in git is what
 runs, and a manual redeploy of some other image is drift the next apply undoes.
 
 Two credentials, kept apart:
-- **Trigger:** one org-owned GitHub App with `actions: write` on `deployments` only, its key an org secret
-  for app repos. It can ask for a deploy of an existing tag and nothing else; `deploy.yml` does the
-  checking.
-- **Deploy App:** used only inside `deployments`' own workflow, to open and merge the bot PRs
-  (`contents` and `pull-requests: write` on `deployments`). Its key never leaves that repo.
+- **`kthais-dispatch`:** `actions: write` on `deployments` only (installed there), its key in the org
+  secrets `DISPATCH_APP_CLIENT_ID` / `DISPATCH_APP_PRIVATE_KEY`, visible to the app repos. It can ask for
+  a deploy of an existing tag and nothing else; `deploy.yml` does the checking.
+- **`kthais-deploy`** (App ID 5165860): `contents` and `pull-requests: write` on `deployments` only, used
+  only by that repo's own workflows to open and merge the bot PRs. Its key is a repo secret there
+  (`DEPLOY_APP_CLIENT_ID` / `DEPLOY_APP_PRIVATE_KEY`) and never leaves it.
 
 ## Build order
 
@@ -209,7 +210,7 @@ Two credentials, kept apart:
 **Every new app is added by hand to each App's installation and to its secrets' repository access**
 (see [app-delivery.md](app-delivery.md), "Adding a new app"). Nothing is scoped to "all repositories":
 a secret is readable by every workflow in every repo it's visible to, so "all" would let any repo in the
-org, including side projects, read the release App's key and act on every app repo.
+org, including side projects, read `kthais-release`'s key and act on every app repo.
 
 **GitHub Free limits** (checked 2026-10-02), which is why app repos and `deployments` are public:
 - Rulesets and branch protection: public repos only. Organization-wide rulesets: GitHub Team and up,
@@ -242,9 +243,9 @@ refuses otherwise; a re-run of an old apply then does nothing.
 |---|---|---|---|
 | `cicd-bot` | Dokploy user, `member` role, API key | `deployments`' applies | 2 |
 | `deployments` CI login | OpenBao JWT role (in `infrastructure`) | `deployments`' OpenBao changes | 2 (as code) |
-| Trigger App | GitHub App, `actions: write` on `deployments` | App repos requesting deploys | 5 |
-| Deploy App | GitHub App, `contents`/`pull-requests: write` on `deployments` | Opening and merging bot PRs | 5 |
-| Release App (`kthais-release`, created 2026-10-02) | GitHub App, org-owned; `contents`, `pull-requests`, `issues: write`; installed on selected app repos | release-please's release PRs, so their checks run | 4 |
+| `kthais-release` (created 2026-10-02) | GitHub App, org-owned; `contents`, `pull-requests`, `issues: write`; installed on selected app repos; org secrets `RELEASE_APP_*` for those repos | release-please's release PRs, so their checks run | 4 |
+| `kthais-dispatch` (created 2026-10-02) | GitHub App, org-owned; `actions: write`; installed on `deployments` only; org secrets `DISPATCH_APP_*` for the app repos | App repos requesting deploys | 5 |
+| `kthais-deploy` (created 2026-10-02, App ID 5165860) | GitHub App, org-owned; `contents`, `pull-requests: write`; installed on `deployments` only; repo secrets `DEPLOY_APP_*` there | Opening and merging bot PRs; the only bypass of `deployments`' review ruleset | 5 |
 
 No GHCR pull account: images are public (see "Builds").
 

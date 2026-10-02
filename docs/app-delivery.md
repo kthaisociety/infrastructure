@@ -29,7 +29,7 @@ release PR ──merge (code owner)──▶ vX.Y.Z + GitHub Release
   (the exact image per environment), and `deploy.yml`.
 - **OpenBao** (`bao.kthais.com`): secret values, at `secret/<project>/<environment>`.
 - **Dokploy**: runs the images. Never builds, never decides what runs.
-- **Bots**: release App, trigger App, deploy App, `cicd-bot` (see
+- **Bots**: `kthais-release`, `kthais-dispatch`, `kthais-deploy` (GitHub Apps), `cicd-bot` (Dokploy) (see
   [bot-accounts.md](bot-accounts.md)).
 
 ## 2. Adding a new app
@@ -60,8 +60,9 @@ A checklist, in order, with who does each step and what "done" looks like.
     gh secret set RELEASE_APP_PRIVATE_KEY --org kthaisociety --visibility selected --repos <repo-a>,<repo-b>,... < key.pem
     ```
     (`--repos` replaces the whole list: name every repo, not only the new one.)
-  - `kthais-deploy-trigger` **[step 5]**: it stays installed on `deployments` only; add the new repo to
-    its org secrets' repository access the same way.
+  - `kthais-dispatch`: it stays installed on `deployments` only; add the new repo to its org secrets'
+    repository access (`DISPATCH_APP_CLIENT_ID`, `DISPATCH_APP_PRIVATE_KEY`) the same way.
+  - `kthais-deploy`: nothing. It lives in `deployments` only.
 - **Ruleset on `main`** (copy onboarding-service's): PRs only, squash only, signed commits, linear
   history, all conversations resolved, required checks (title, tests, `Greptile Review`).
 
@@ -109,7 +110,7 @@ digest matches) → production redeploys → `release` goes green.
 A table: symptom → which run to open → likely cause → fix. At least:
 - Title check fails on a PR.
 - `build` fails (tests, image push).
-- Release PR doesn't appear or has no checks (release App).
+- Release PR doesn't appear or has no checks (`kthais-release`: installed on the repo? secrets visible to it?).
 - `deploy.yml` rejects the request (unknown project/environment, tag missing, digest mismatch).
 - Bot PR fails `bot-scope` or other checks.
 - Apply fails: vault reference doesn't resolve (missing key), image pull denied (GHCR credential),
