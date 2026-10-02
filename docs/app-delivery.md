@@ -155,8 +155,8 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 
 ## 4. Rolling back
 - Revert the `release.yaml` commit in `deployments` (or set the previous image): merging redeploys it.
-- Setting an environment back to `null` doesn't stop or delete anything: the app keeps running what it
-  runs, and deploys turn off. To take an app down, stop it in Dokploy; to remove it, remove the
+- An environment that has had an image can't go back to `null` (`check` rejects it: the app would point
+  at the never-deployed placeholder). To take an app down, stop it in Dokploy; to remove it, remove the
   environment from `project.yaml`.
 - Never move a version tag, never edit the image in the Dokploy UI.
 - Only `main`'s current tip is ever applied: re-running an old apply run does nothing.
@@ -173,6 +173,7 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 | `release` red at "Wait for the release commit's build" | that run | the release commit's `build` failed or took over 45 min → fix, re-run |
 | `deployments` `check` red: "isn't in … projects.yaml" | the check | add the printed line in `infrastructure` (2.2) |
 | `deployments` `check` red: image format | the check | `release.yaml` needs `<image>:<tag>@sha256:<digest>` |
+| `deployments` `check` red: "can't go back to null" | the check | roll back by setting a previous image, not `null` |
 | `deployments` `plan` waiting | the run | needs a reviewer to approve the `plan` environment |
 | Apply: `verify_connection` / vault provider error | `apply` run | Dokploy can't reach OpenBao or the token is wrong; check OpenBao is up and the provider token |
 | Apply: 403 from OpenBao | `apply` run | `deployments-ci`'s policy lacks a path, or the project isn't in `projects.yaml` (no policy) |
