@@ -21,7 +21,8 @@ release PR ──merge (code owner)──▶ vX.Y.Z + GitHub Release
 
 - **App repo** (e.g. `kthaisociety/onboarding-service`): the code, `CHANGELOG.md`, the version
   (release-please's manifest), and three small workflow files that call `kthaisociety/workflows`.
-- **`kthaisociety/workflows`**: the reusable workflows. `semantic-pr`, `build`, `release`.
+- **`kthaisociety/workflows`**: the reusable workflows. `semantic-pr`, `build`, `release`. Public, and
+  must stay public: the public app repos can't call workflows from a private repo.
 - **GHCR** (`ghcr.io/kthaisociety/<project>`): the images. Private; each package writable only by its
   own repo.
 - **`kthaisociety/deployments`**: per project, `project.yaml` (config, secret names) and `release.yaml`
@@ -43,7 +44,24 @@ A checklist, in order, with who does each step and what "done" looks like.
 - `CODEOWNERS`: who approves releases.
 - Ruleset on `main`: PRs only, squash only, signed commits, required checks (title, tests); release PR
   requires a code owner.
-- Install the release App and the trigger App on the repo.
+- **The repo must be public.** The org is on GitHub Free: rulesets and org secrets don't work for
+  private repos.
+- **Add the repo to each GitHub App's scope, and to its secrets.** Nothing is "all repositories", on
+  purpose: a secret is readable by every workflow in every repo it's visible to, and an App's key works
+  on every repo it's installed on.
+  - `kthais-release`: org → Settings → GitHub Apps → `kthais-release` → Configure → add the repo under
+    "Only select repositories". Then add the repo to the org secrets `RELEASE_APP_CLIENT_ID` and
+    `RELEASE_APP_PRIVATE_KEY` (org → Settings → Secrets and variables → Actions → each secret →
+    repository access), or:
+    ```sh
+    gh secret set RELEASE_APP_CLIENT_ID   --org kthaisociety --visibility selected --repos <repo-a>,<repo-b>,... --body '<client id>'
+    gh secret set RELEASE_APP_PRIVATE_KEY --org kthaisociety --visibility selected --repos <repo-a>,<repo-b>,... < key.pem
+    ```
+    (`--repos` replaces the whole list: name every repo, not only the new one.)
+  - `kthais-deploy-trigger` **[step 5]**: it stays installed on `deployments` only; add the new repo to
+    its org secrets' repository access the same way.
+- **Ruleset on `main`** (copy onboarding-service's): PRs only, squash only, signed commits, linear
+  history, all conversations resolved, required checks (title, tests, `Greptile Review`).
 
 ### 2.2 In `deployments` **[step 4]**
 - `projects/<project>/project.yaml`: image name, port, domain (if any), volumes, non-secret env and

@@ -201,6 +201,17 @@ Two credentials, kept apart:
 
 ## Bot accounts and credentials
 
+**Every new app is added by hand to each App's installation and to its secrets' repository access**
+(see [app-delivery.md](app-delivery.md), "Adding a new app"). Nothing is scoped to "all repositories":
+a secret is readable by every workflow in every repo it's visible to, so "all" would let any repo in the
+org, including side projects, read the release App's key and act on every app repo.
+
+**GitHub Free limits** (checked 2026-10-02), which is why app repos and `deployments` are public:
+- Rulesets and branch protection: public repos only. Organization-wide rulesets: GitHub Team and up,
+  public repos included, so every repo gets its own ruleset.
+- Organization secrets: not readable by private repos.
+- Environment required reviewers: public repos only.
+
 Every non-human identity in this plan is **created by hand**: GitHub has no API to create a user
 account, a GitHub App's private key is only downloadable once from its settings, and Dokploy only lets
 the organization owner set a member's permissions and only the user itself create its API keys. What
@@ -218,7 +229,7 @@ GitHub environment secret), how to rotate them, and what breaks if they expire o
 | `deployments` CI login | OpenBao JWT role (in `infrastructure`) | `deployments`' OpenBao changes | 2 (as code) |
 | Trigger App | GitHub App, `actions: write` on `deployments` | App repos requesting deploys | 5 |
 | Deploy App | GitHub App, `contents`/`pull-requests: write` on `deployments` | Opening and merging bot PRs | 5 |
-| Release App | GitHub App, `contents`/`pull-requests: write` on app repos | release-please's release PRs, so their checks run | 4 |
+| Release App (`kthais-release`, created 2026-10-02) | GitHub App, org-owned; `contents`, `pull-requests`, `issues: write`; installed on selected app repos | release-please's release PRs, so their checks run | 4 |
 
 Until the GHCR pull account exists, a classic `read:packages` token from an infra admin's own account
 can stand in. It's stored in one place (the `production` environment), so switching is one secret; its
@@ -250,7 +261,9 @@ can stand in. It's stored in one place (the `production` environment), so switch
 5. ~~Release tool.~~ **release-please** (2026-10-02): the release PR is the approval step.
 6. ~~Where reusable workflows live.~~ **`kthaisociety/workflows`** (2026-10-02), its own repo: app repos
    don't depend on the repo that holds deploy credentials, and pin the workflows by tag. Created
-   2026-10-02 (private), with its Actions access set to "organization", so org repos can call it.
+   2026-10-02, **public, and it must stay public**: a public repo can't call reusable workflows from a
+   private one (the "organization" Actions access setting only opens a private repo to other private
+   repos), and every app repo is public. It holds no secrets.
 7. **PR plans in `deployments`.** Its CI login can mint tokens that read project secrets (see "Two repos"),
    so it can't be handed to unreviewed PR code. Default: PR plans in the `plan` environment behind a
    reviewer, as in `infrastructure`. Option: a separate PR role whose policy can read policies and look
