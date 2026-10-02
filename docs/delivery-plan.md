@@ -261,7 +261,9 @@ can stand in. It's stored in one place (the `production` environment), so switch
 5. ~~Release tool.~~ **release-please** (2026-10-02): the release PR is the approval step.
 6. ~~Where reusable workflows live.~~ **`kthaisociety/workflows`** (2026-10-02), its own repo: app repos
    don't depend on the repo that holds deploy credentials, and pin the workflows by tag. Created
-   2026-10-02 (private), with its Actions access set to "organization", so org repos can call it.
+   2026-10-02, **public, and it must stay public**: a public repo can't call reusable workflows from a
+   private one (the "organization" Actions access setting only opens a private repo to other private
+   repos), and every app repo is public. It holds no secrets.
 7. **PR plans in `deployments`.** Its CI login can mint tokens that read project secrets (see "Two repos"),
    so it can't be handed to unreviewed PR code. Default: PR plans in the `plan` environment behind a
    reviewer, as in `infrastructure`. Option: a separate PR role whose policy can read policies and look

@@ -21,7 +21,8 @@ release PR ──merge (code owner)──▶ vX.Y.Z + GitHub Release
 
 - **App repo** (e.g. `kthaisociety/onboarding-service`): the code, `CHANGELOG.md`, the version
   (release-please's manifest), and three small workflow files that call `kthaisociety/workflows`.
-- **`kthaisociety/workflows`**: the reusable workflows. `semantic-pr`, `build`, `release`.
+- **`kthaisociety/workflows`**: the reusable workflows. `semantic-pr`, `build`, `release`. Public, and
+  must stay public: the public app repos can't call workflows from a private repo.
 - **GHCR** (`ghcr.io/kthaisociety/<project>`): the images. Private; each package writable only by its
   own repo.
 - **`kthaisociety/deployments`**: per project, `project.yaml` (config, secret names) and `release.yaml`
