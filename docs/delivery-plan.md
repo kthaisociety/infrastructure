@@ -82,7 +82,7 @@ Every app repo (and both infra repos) uses [Conventional Commits](https://www.co
 
 | Environment | What runs | Who decides |
 |---|---|---|
-| `staging` (optional per project) | The image `main` just built: tag `sha-<short sha>`, pinned by digest | Automatic, on every merge to `main` |
+| `staging` (every project, by default) | The image `main` just built: tag `sha-<short sha>`, pinned by digest | Automatic, on every merge to `main` |
 | `production` | A release: tag `X.Y.Z`, pinned by digest | A code owner, by approving the release PR |
 
 - **Every image reference is pinned by digest**: `ghcr.io/kthaisociety/<project>:1.4.0@sha256:…`. A tag can
@@ -93,8 +93,11 @@ Every app repo (and both infra repos) uses [Conventional Commits](https://www.co
 
 ### Releases: a release PR that code owners approve
 
-Per app repo, with [release-please](https://github.com/googleapis/release-please) (or an equivalent;
-open question 5):
+Per app repo, with [release-please](https://github.com/googleapis/release-please) (decided, open question
+5). One release PR per repo at a time: each merge to `main` creates it or adds to it, so any number of
+feature PRs end up in one release, and feature PRs never wait for it. release-please runs with the
+**release App**'s token, not `GITHUB_TOKEN`: GitHub runs no workflows for events made with
+`GITHUB_TOKEN`, so the release PR would never get its required checks and could never be merged.
 
 1. As `feat:`/`fix:` commits land on `main`, the release bot keeps one open **release PR**: the next
    version (from the commit types) and the `CHANGELOG.md` entries.
@@ -191,7 +194,7 @@ Two credentials, kept apart:
 6. **onboarding-service on the new project**, image-based. The migration doc's data copy and switchover
    steps stay as they are; only the source changes from the GitHub App to `release.yaml`.
 7. The next projects, one at a time: landingpage-backend, then the rest.
-8. **`docs/app-delivery.md`**: one linear guide, from a `git push` or a merged release PR to the app
+8. **[`docs/app-delivery.md`](app-delivery.md)** (outline written 2026-10-02): one linear guide, from a `git push` or a merged release PR to the app
    running on Dokploy: every check, approval, workflow and apply on the way, what each one proves, how
    to roll back, and where to look when a step fails. Each step above adds a draft section as it's
    built; it's finished last, against the real system, so it describes what exists.
@@ -215,6 +218,7 @@ GitHub environment secret), how to rotate them, and what breaks if they expire o
 | `deployments` CI login | OpenBao JWT role (in `infrastructure`) | `deployments`' OpenBao changes | 2 (as code) |
 | Trigger App | GitHub App, `actions: write` on `deployments` | App repos requesting deploys | 5 |
 | Deploy App | GitHub App, `contents`/`pull-requests: write` on `deployments` | Opening and merging bot PRs | 5 |
+| Release App | GitHub App, `contents`/`pull-requests: write` on app repos | release-please's release PRs, so their checks run | 4 |
 
 Until the GHCR pull account exists, a classic `read:packages` token from an infra admin's own account
 can stand in. It's stored in one place (the `production` environment), so switching is one secret; its
@@ -231,13 +235,22 @@ can stand in. It's stored in one place (the `production` environment), so switch
    project. Not tested ahead (decided 2026-10-02): whether a member can create vault providers. The
    first apply in step 2 shows it; if it can't, `cicd-bot` becomes an admin, and the split then
    protects OpenBao's config but not Dokploy's settings.
-4. **Staging.** Which projects get a `staging` environment, and on the same host? It doubles their
-   resource use.
-5. **Release tool.** release-please (release PR, changelog, works per language) or semantic-release
-   (releases on every merge, no approval step). The approval requirement points to release-please.
-6. **Where reusable workflows live**: in `deployments`, or a separate `kthaisociety/workflows` repo that
-   every app repo can call. Private repos can only call workflows from repos that allow it (an org
-   setting).
+4. ~~Staging.~~ **Every project has `staging` and `production` by default** (2026-10-02). A per-project
+   switch to skip staging can come later, when a project needs it; the flow already handles a project
+   without staging. onboarding-service goes first and exercises both deploy paths, the promotion gate,
+   per-environment secret paths and verify item 1 (a provider assigned per environment).
+   Each project decides what its staging secrets are. onboarding-service's are **inert**, so its staging
+   has no power over real accounts:
+   - `GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON`: a dummy service account JSON with no real key. The app's
+     `googleworkspace.NewClient` only parses it at boot (the key is used on the first Google call), so
+     it starts, and any call to Google fails.
+   - `MATTERMOST_BOT_TOKEN`: a dummy value. The startup ping only logs a failure.
+   - `ONBOARDING_SERVICE_SECRET`: its own random value, so production and staging can't call each other.
+   - Non-secret env as production, with its own empty volume.
+5. ~~Release tool.~~ **release-please** (2026-10-02): the release PR is the approval step.
+6. ~~Where reusable workflows live.~~ **`kthaisociety/workflows`** (2026-10-02), its own repo: app repos
+   don't depend on the repo that holds deploy credentials, and pin the workflows by tag. Created
+   2026-10-02 (private), with its Actions access set to "organization", so org repos can call it.
 7. **PR plans in `deployments`.** Its CI login can mint tokens that read project secrets (see "Two repos"),
    so it can't be handed to unreviewed PR code. Default: PR plans in the `plan` environment behind a
    reviewer, as in `infrastructure`. Option: a separate PR role whose policy can read policies and look
