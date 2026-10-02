@@ -4,10 +4,10 @@ name: tofu
 # glesys → openbao → dokploy (docs/plan.md, "Bootstrap order", for how the very first build differed).
 
 on:
+  # Every PR, not only those touching terraform/: fmt and openbao-validate are required checks, and a
+  # required check that never starts blocks the PR. The plan jobs still run only when terraform/
+  # changed (the `changes` job).
   pull_request:
-    paths:
-      - "terraform/**"
-      - ".github/workflows/tofu.yml"
   push:
     branches: [main]
     paths:
@@ -23,9 +23,12 @@ permissions:
   contents: read
 
 concurrency:
-  # One run at a time across the repo: state locking isn't enabled yet (see terraform/glesys/versions.tf).
-  group: tofu
-  cancel-in-progress: false
+  # Applies (main, schedule, dispatch): one at a time across the repo, since state locking isn't enabled
+  # (see terraform/glesys/versions.tf). PRs: one group per PR, so they never queue behind an apply or
+  # cancel each other's required checks (a group holds one pending run, and a newer one cancels it).
+  # PR plans only read state (-lock=false). A new push to a PR cancels that PR's older run.
+  group: ${{ github.event_name == 'pull_request' && format('tofu-pr-{0}', github.event.pull_request.number) || 'tofu' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -52,9 +55,31 @@ jobs:
           tofu_version: ${{ env.TOFU_VERSION }}
       - run: tofu fmt -check -recursive terraform
 
-  glesys-plan:
+  # On PRs: did terraform/ or this workflow change? If not, the plan jobs are skipped, instead of
+  # waiting for a reviewer to approve the `plan` environment for nothing.
+  changes:
     if: github.event_name == 'pull_request'
-    needs: fmt
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      terraform: ${{ steps.files.outputs.terraform }}
+    steps:
+      - id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename' \
+              | grep -qE '^(terraform/|\.github/workflows/tofu\.yml$)'; then
+            echo "terraform=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "terraform=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  glesys-plan:
+    if: github.event_name == 'pull_request' && needs.changes.outputs.terraform == 'true'
+    needs: [fmt, changes]
     runs-on: ubuntu-latest
     # Holds the same secrets as production. Its required reviewers gate them: approving a run executes
     # the branch's workflow and Terraform code with those secrets, so review the whole diff first.
@@ -112,8 +137,8 @@ jobs:
       - run: tofu apply -auto-approve
 
   dokploy-plan:
-    if: github.event_name == 'pull_request'
-    needs: fmt
+    if: github.event_name == 'pull_request' && needs.changes.outputs.terraform == 'true'
+    needs: [fmt, changes]
     runs-on: ubuntu-latest
     # See glesys-plan.
     environment: plan
