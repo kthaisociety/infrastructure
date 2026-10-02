@@ -224,8 +224,19 @@ OpenTofu can manage is where those credentials are used (e.g. the Dokploy regist
 `password_wo` from a `production` secret), not the accounts themselves.
 
 So they're documented instead, in `docs/bot-accounts.md` (written with the step that creates each one):
-per account, why it exists, its exact permissions, where its credentials are stored (1Password item,
-GitHub environment secret), how to rotate them, and what breaks if they expire or are revoked.
+per account, why it exists, its exact permissions, where its credentials are stored, how to rotate them,
+and what breaks if they expire or are revoked.
+
+**GitHub App private keys are not kept anywhere but their GitHub secret** (decided 2026-10-02). An App
+can hold several valid keys, and an org owner can generate one at any time, so a copy in 1Password would
+only add a place to leak from. Rotating, for a leak or routinely: generate a new key on the App's page,
+`gh secret set` it, delete the old key, which stops working at once. The Client IDs aren't secret and
+are recorded in `bot-accounts.md`.
+
+**Re-running an old run must not roll back.** `kthais-dispatch` (held by every app repo) has
+`actions: write` on `deployments`, which also allows re-running past runs, and a re-run uses its original
+commit. So every apply in `deployments` first checks that its commit is still the tip of `main`, and
+refuses otherwise; a re-run of an old apply then does nothing.
 
 | Identity | Kind | Used for | Created in step |
 |---|---|---|---|

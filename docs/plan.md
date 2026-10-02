@@ -575,7 +575,7 @@ Every root module is planned on PRs and applied on merge to `main` by GitHub Act
 ### 1Password holds break-glass material
 OpenBao recovery keys and static unseal key, the GleSYS API key and the `tfstate` credential, the
 state encryption passphrase, Dokploy admin credentials (including the `terraform` user's password; its API key lives only in GitHub and is rotated by making a new one), each
-infra admin's OpenBao password (their own), and the GitHub Apps' private keys (release, and the two deploy Apps). With the repo, GleSYS and the
+infra admin's OpenBao password (their own). Not the GitHub Apps' private keys: an org owner can generate a new one at any time, so their only copy is the GitHub secret, and losing or leaking one means rotating it (docs/bot-accounts.md). With the repo, GleSYS and the
 1Password vault, anyone can rebuild everything.
 
 ## Bootstrap order
