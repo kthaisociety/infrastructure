@@ -69,12 +69,14 @@ How the move keeps everything working:
 token, vault provider and app are created in one apply, in order. That removes the "new project has no
 token on the PR plan" problem the two-root setup has.
 
-**Its state is separate from `infrastructure`'s** (decided 2026-10-02): its own GleSYS object storage
-instance, credential and bucket (made by `terraform/glesys`), and its own encryption passphrase.
-GleSYS credentials are per instance, so sharing `kthais-tfstate` would let `deployments`' CI read and
-overwrite `infrastructure`'s state, which holds OpenBao tokens and GleSYS keys. For the same reason
-it **doesn't read `infrastructure`'s state**: the few values it needs (e.g. the backup destination's id)
-are non-secret ids in its own config, or looked up through the Dokploy provider's data sources.
+**Its state shares `infrastructure`'s bucket, under its own passphrase** (decided 2026-10-02):
+`kthais-tfstate`, key `deployments/terraform.tfstate`, the same CI credential, and **a different
+encryption passphrase**. GleSYS credentials cover a whole instance, so `deployments`' CI can reach
+`infrastructure`'s state objects; the passphrase keeps them unreadable to it (OpenBao tokens, GleSYS
+keys), and the bucket's versioning makes an overwrite recoverable. A separate instance would also rule
+out tampering; not worth the extra instance while the same people and gates guard both repos. It
+**doesn't read `infrastructure`'s state** either: the few values it needs (e.g. the backup
+destination's id) are non-secret ids in its own config, or looked up through the Dokploy provider.
 
 ### Semantic commits, enforced
 

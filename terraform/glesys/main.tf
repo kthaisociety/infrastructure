@@ -19,19 +19,6 @@ resource "glesys_objectstorage_instance" "tfstate" {
   }
 }
 
-# kthaisociety/deployments' state, apart from this repo's: GleSYS credentials cover a whole instance, so
-# sharing kthais-tfstate would let deployments' CI read and overwrite infrastructure's state. Its bucket
-# (kthais-deployments-tfstate) and CI credential are made by hand, like tfstate's, and go straight into
-# deployments' environment secrets, never into this state.
-resource "glesys_objectstorage_instance" "deployments_tfstate" {
-  datacenter  = var.datacenter
-  description = "deployments-tfstates"
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
 # --- OpenBao snapshots -------------------------------------------------------
 
 resource "glesys_objectstorage_instance" "openbao_snapshots" {
