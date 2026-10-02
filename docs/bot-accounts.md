@@ -76,7 +76,7 @@ no OAuth, no client secret.
 ### `Deployments CI` (`ops+dokploy-deployments@kthais.com`)
 | | |
 |---|---|
-| Role | **admin**. Started as a member (create projects, services, environments; API access), but members can't use vault providers (401 on `vaultProvider.testConnection`), and the custom role that could grant that needs a paid Dokploy license |
+| Role | **admin**. Started as a member (create projects, services, environments; API access), but members can't create or manage vault providers, only use ones already assigned to them (401 on `vaultProvider.testConnection`), and the custom role that could grant that needs a paid Dokploy license |
 | Used by | `kthaisociety/deployments`' OpenTofu (projects, environments, vault providers, apps) |
 | Key | `deployments-ci`, in `deployments`' `production` and `plan` environments as `DOKPLOY_API_KEY`; rate limiting off; copy in 1Password |
 | If the key leaks | anything in Dokploy, like the `infrastructure` key: rotate at once. Its own user, so revoking it doesn't touch `infrastructure` |
