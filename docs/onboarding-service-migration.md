@@ -57,9 +57,9 @@ for the shared secret.
   Lengths after: 404, 25, 44.
 
 ### 3. Dokploy side — deployments#1
-Merge: project, environments, provider tokens, vault providers (connection tested), no apps. Check in
-Dokploy: project `onboarding-service` with `staging` and `production`, and both providers under
-Settings → Secrets.
+Merge: project, environments, provider tokens, vault providers (connection tested), and both apps with
+their `/data` mounts, not deployed (placeholder image). Check in Dokploy: project `onboarding-service`
+with `staging` and `production`, an app in each (idle), and both providers under Settings → Secrets.
 
 ### 4. Staging
 PR to `deployments`:
@@ -99,7 +99,8 @@ Then a PR to `deployments`:
 ```yaml
 production: ghcr.io/kthaisociety/onboarding-service:1.0.0@sha256:<digest of 1.0.0>
 ```
-Merge: the production app is created with that volume and deployed. Check its log and `/health` as in
+Merge: the production app switches to that image and deploys, with the volume (attached since step 3)
+holding the copied database. Check its log and `/health` as in
 step 4 (Mattermost reachable this time).
 
 ### 7. Switch the callers

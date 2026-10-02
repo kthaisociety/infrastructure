@@ -100,11 +100,13 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
   [onboarding-service-migration.md](onboarding-service-migration.md)).
 
 ### 2.4 Its Dokploy side, in `deployments`
-- `projects/<project>/project.yaml` (format in 6.2) and `projects/<project>/release.yaml` with `null` for
-  every environment.
+- `projects/<project>/project.yaml` (format in 6.2) and `projects/<project>/release.yaml` with a line per
+  environment, `null` for now. Both required: a missing file or line fails `check`.
 - PR (a reviewer approves the `plan` run), merge. Creates the Dokploy project `<project>` with `staging`
-  and `production`, and per environment a provider token and a vault provider `<project>-<env>`
-  (connection tested). No app yet: no image.
+  and `production`, and per environment a provider token, a vault provider `<project>-<env>` (connection
+  tested), and the app with its volumes, **not deployed** (a placeholder image, deploys off). The app
+  exists before its first deploy so its volumes are attached by then: a mount can only be added to an app
+  that exists.
 
 ### 2.5 Domains (if public) **[not yet]**
 - `modules/project` doesn't create domains yet. Planned: `domains: [...]` per environment and `port:`
@@ -115,8 +117,9 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 
 ### 2.6 First deploy, to staging
 - PR to `deployments` setting `release.yaml`'s `staging:` to `ghcr.io/kthaisociety/<repo>:sha-<7>@sha256:<digest>`
-  (digest from the `build` run's summary, or the registry). Merge: the app and its volumes are created and
-  deployed.
+  (digest from the `build` run's summary, or the registry). Merge: the app switches from the placeholder
+  to the image and deploys, volumes already attached. (To confirm on onboarding-service's first staging
+  deploy: that this change deploys by itself. If not, press Deploy once in Dokploy.)
 - **Done when:** the deploy succeeds (every `${{vault…}}` reference resolved; a missing key fails the
   deploy), the app logs look right, and it answers on `http://<app name>:<port>` from `dokploy-network`.
 
@@ -152,6 +155,9 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 
 ## 4. Rolling back
 - Revert the `release.yaml` commit in `deployments` (or set the previous image): merging redeploys it.
+- Setting an environment back to `null` doesn't stop or delete anything: the app keeps running what it
+  runs, and deploys turn off. To take an app down, stop it in Dokploy; to remove it, remove the
+  environment from `project.yaml`.
 - Never move a version tag, never edit the image in the Dokploy UI.
 - Only `main`'s current tip is ever applied: re-running an old apply run does nothing.
 
@@ -207,7 +213,7 @@ Redis (optional blocks, for landingpage-backend), build arguments.
 ### 6.3 `release.yaml` (in `deployments`)
 ```yaml
 staging: ghcr.io/kthaisociety/my-app:sha-3b6e8e5@sha256:<64 hex>
-production: null                     # null: no app in that environment yet
+production: null                     # null: not deployed yet (the app exists, with a placeholder image)
 ```
 
 ### 6.4 Workflows
