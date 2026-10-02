@@ -50,7 +50,10 @@ In order. Each step says what "done" looks like.
 - **release-please config** at the root: `release-please-config.json` (`release-type`: `go`, `node`,
   `python`, …, or `simple`; `bootstrap-sha`: the commit before adoption, so the first changelog starts
   there) and `.release-please-manifest.json` (`{".": "0.0.0"}`).
-- **`.github/CODEOWNERS`**: who approves releases (`* @kthaisociety/it-team`). The team needs write access.
+- **`.github/CODEOWNERS`**: who approves releases (today `* @sammosios`). Keep it to the people who
+  actually review: GitHub requests a review from, and emails, every code owner on every PR, including the
+  deploy bot's and release-please's. A team works too, but the whole team gets every request; it needs
+  write access.
 - **Repo settings:** squash merges only, squash commit title = PR title (so a one-commit PR can't skip
   the title check), delete branches after merge.
 - **Ruleset on `main`:** no deletion or force-push, linear history, signed commits, PRs only, squash
