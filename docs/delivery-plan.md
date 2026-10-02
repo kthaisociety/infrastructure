@@ -31,7 +31,7 @@ GitHub App) on hold: onboarding-service moves straight to this model instead.
 | Changes | Rare, reviewed by infra admins | Frequent: tag bumps by a bot, project config by PR |
 | Who writes | Humans, by PR | Humans by PR; the deploy bot through its own PRs, which only change image files |
 | CI's OpenBao rights | `terraform`: everything | Only what projects need: `dokploy-project-*` policies, tokens from the `dokploy-provider` role, secret **metadata** (empty paths). Not `infrastructure/*`, auth methods, admin policies or the token role |
-| CI's Dokploy rights | Admin API key | A key for its own non-admin Dokploy user, `cd-bot`, limited to project resources (open question 3) |
+| CI's Dokploy rights | Admin API key | A key for its own non-admin Dokploy user, `cicd-bot`, limited to project resources (open question 3) |
 
 Why split:
 - **Permissions.** The deploy bot needs to change `main` without a human review. In `infrastructure`
@@ -176,12 +176,13 @@ Two credentials, kept apart:
 
 ## Build order
 
-1. **This plan**, reviewed. Questions 1–3 are answered; check question 3 against Dokploy's permissions.
+1. **This plan**, reviewed (#10, merged 2026-10-02). Questions 1–3 are answered.
 2. **`deployments` repo**: repo, rulesets, `production`/`plan` environments, its own OpenBao JWT role and
    policy (made in `infrastructure`), its Dokploy key, its weekly apply. Move the project parts out of
    `infrastructure` as in "How the move keeps everything working": `deployments` applies first
    (imports, new tokens), then `infrastructure` (keeps the rest, revokes old tokens). Check both plans
-   show no destroy or replace outside the old tokens.
+   show no destroy or replace outside the old tokens. The first apply is also the test of open
+   question 3: if `cicd-bot` can't create a vault provider, it fails there.
 3. **GHCR pull credential** as a Dokploy registry in `infrastructure` (verify item 4: does a registry
    alone let Dokploy pull, or does each app need it set).
 4. **Reusable workflows**: semantic PR titles, build, release. Then onboarding-service adopts them:
@@ -190,16 +191,46 @@ Two credentials, kept apart:
 6. **onboarding-service on the new project**, image-based. The migration doc's data copy and switchover
    steps stay as they are; only the source changes from the GitHub App to `release.yaml`.
 7. The next projects, one at a time: landingpage-backend, then the rest.
+8. **`docs/app-delivery.md`**: one linear guide, from a `git push` or a merged release PR to the app
+   running on Dokploy: every check, approval, workflow and apply on the way, what each one proves, how
+   to roll back, and where to look when a step fails. Each step above adds a draft section as it's
+   built; it's finished last, against the real system, so it describes what exists.
+
+## Bot accounts and credentials
+
+Every non-human identity in this plan is **created by hand**: GitHub has no API to create a user
+account, a GitHub App's private key is only downloadable once from its settings, and Dokploy only lets
+the organization owner set a member's permissions and only the user itself create its API keys. What
+OpenTofu can manage is where those credentials are used (e.g. the Dokploy registry entry, with
+`password_wo` from a `production` secret), not the accounts themselves.
+
+So they're documented instead, in `docs/bot-accounts.md` (written with the step that creates each one):
+per account, why it exists, its exact permissions, where its credentials are stored (1Password item,
+GitHub environment secret), how to rotate them, and what breaks if they expire or are revoked.
+
+| Identity | Kind | Used for | Created in step |
+|---|---|---|---|
+| GHCR pull account (e.g. `kthais-cicd`) | GitHub user, classic token `read:packages` | Dokploy pulling private images | 3 |
+| `cicd-bot` | Dokploy user, `member` role, API key | `deployments`' applies | 2 |
+| `deployments` CI login | OpenBao JWT role (in `infrastructure`) | `deployments`' OpenBao changes | 2 (as code) |
+| Trigger App | GitHub App, `actions: write` on `deployments` | App repos requesting deploys | 5 |
+| Deploy App | GitHub App, `contents`/`pull-requests: write` on `deployments` | Opening and merging bot PRs | 5 |
+
+Until the GHCR pull account exists, a classic `read:packages` token from an infra admin's own account
+can stand in. It's stored in one place (the `production` environment), so switching is one secret; its
+1Password item says "temporary, tied to <name>".
 
 ## Open questions
 
 1. ~~Private or public images.~~ **Private** (2026-10-02), with a classic `read:packages` token.
-2. ~~A machine GitHub account.~~ **Yes, one is created** for the pull token. It has to be a user account,
-   not a GitHub App (see "Builds"). Name and owner of its credentials to decide.
-3. **Dokploy permissions for `deployments`.** Decided: its own non-admin Dokploy user, `cd-bot`. To
-   check before step 2: can that user create projects, apps and vault providers while being unable to
-   touch the `infrastructure` project (OpenBao's compose) and Dokploy's settings? If not, `cd-bot` needs
-   admin, and the split protects OpenBao's config but not Dokploy.
+2. ~~A machine GitHub account.~~ **Yes, created by hand** for the pull token (see "Bot accounts and
+   credentials"). It has to be a user account, not a GitHub App (see "Builds"). An admin's own token
+   can stand in until it exists.
+3. **Dokploy permissions for `deployments`.** Decided: its own `member` Dokploy user, `cicd-bot`, with
+   create projects/services/environments and API access, and no access to the `infrastructure`
+   project. Not tested ahead (decided 2026-10-02): whether a member can create vault providers. The
+   first apply in step 2 shows it; if it can't, `cicd-bot` becomes an admin, and the split then
+   protects OpenBao's config but not Dokploy's settings.
 4. **Staging.** Which projects get a `staging` environment, and on the same host? It doubles their
    resource use.
 5. **Release tool.** release-please (release PR, changelog, works per language) or semantic-release
