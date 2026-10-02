@@ -67,8 +67,14 @@ How the move keeps everything working:
 
 `deployments` is one root module with both providers (OpenBao and Dokploy), so a project's policy,
 token, vault provider and app are created in one apply, in order. That removes the "new project has no
-token on the PR plan" problem the two-root setup has. It reads what it needs from `infrastructure`'s
-state (Dokploy registry id, backup destination id) through `terraform_remote_state`.
+token on the PR plan" problem the two-root setup has.
+
+**Its state is separate from `infrastructure`'s** (decided 2026-10-02): its own GleSYS object storage
+instance, credential and bucket (made by `terraform/glesys`), and its own encryption passphrase.
+GleSYS credentials are per instance, so sharing `kthais-tfstate` would let `deployments`' CI read and
+overwrite `infrastructure`'s state, which holds OpenBao tokens and GleSYS keys. For the same reason
+it **doesn't read `infrastructure`'s state**: the few values it needs (e.g. the backup destination's id)
+are non-secret ids in its own config, or looked up through the Dokploy provider's data sources.
 
 ### Semantic commits, enforced
 
@@ -221,8 +227,8 @@ org, including side projects, read `kthais-release`'s key and act on every app r
 Every non-human identity in this plan is **created by hand**: GitHub has no API to create a user
 account, a GitHub App's private key is only downloadable once from its settings, and Dokploy only lets
 the organization owner set a member's permissions and only the user itself create its API keys. What
-OpenTofu can manage is where those credentials are used (e.g. the Dokploy registry entry, with
-`password_wo` from a `production` secret), not the accounts themselves.
+OpenTofu can manage is where those credentials are used (e.g. a `*_wo` attribute fed from a
+`production` secret), not the accounts themselves.
 
 So they're documented instead, in `docs/bot-accounts.md` (written with the step that creates each one):
 per account, why it exists, its exact permissions, where its credentials are stored, how to rotate them,

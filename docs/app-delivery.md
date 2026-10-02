@@ -23,7 +23,8 @@ release PR ──merge (code owner)──▶ vX.Y.Z + GitHub Release
   (release-please's manifest), and three small workflow files that call `kthaisociety/workflows`.
 - **`kthaisociety/workflows`**: the reusable workflows. `semantic-pr`, `build`, `release`. Public, and
   must stay public: the public app repos can't call workflows from a private repo.
-- **GHCR** (`ghcr.io/kthaisociety/<project>`): the images. Private; each package writable only by its
+- **GHCR** (`ghcr.io/kthaisociety/<project>`): the images. Public (made so by hand after the first
+  push, since GHCR creates packages private); each package writable only by its
   own repo.
 - **`kthaisociety/deployments`**: per project, `project.yaml` (config, secret names) and `release.yaml`
   (the exact image per environment), and `deploy.yml`.
@@ -46,8 +47,12 @@ A checklist, in order, with who does each step and what "done" looks like.
   requires a code owner.
 - **The repo must be public** (public by design; also, the org is on GitHub Free, where rulesets and org
   secrets don't work for private repos).
-- **After the first build, make the image public**: org → Packages → `<repo>` → Package settings →
-  Danger Zone → Change visibility → Public. Dokploy pulls with no credentials.
+- **The callers start without deploying.** `build.yml` and `release.yml` don't ask `deployments` for
+  deploys yet (the project doesn't exist there); that's switched on in 2.5.
+- **After the first build, make the image public** (GHCR creates every new package private): org →
+  Packages → `<repo>` → Package settings → Danger Zone → Change visibility → Public. Check it: `docker
+  pull ghcr.io/kthaisociety/<repo>:sha-<7>` works logged out. Dokploy pulls with no credentials, so
+  until this is done no deploy of the app can work.
 - **Add the repo to each GitHub App's scope, and to its secrets.** Nothing is "all repositories", on
   purpose: a secret is readable by every workflow in every repo it's visible to, and an App's key works
   on every repo it's installed on.
@@ -81,8 +86,12 @@ A checklist, in order, with who does each step and what "done" looks like.
 - `dnscontrol` PR for each host (staging and production).
 
 ### 2.5 First deploy **[step 5]**
-- Merge anything to `main` (or re-run `build`): the first image goes to staging.
+Needs 2.1's public image, 2.2 and 2.3.
+- In the app repo, switch on deploy requests in `build.yml` (staging) and `release.yml` (production)
+  (one input each), and merge that. Its build deploys to staging.
 - First release: merge the release PR. Production gets its first image.
+- If a deploy fails with "pull access denied" / "manifest unknown": the image isn't public. Make it
+  public, then re-run the failed `build` run's failed jobs; it requests the deploy again.
 
 ## 3. Day to day
 
