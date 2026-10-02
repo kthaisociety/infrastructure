@@ -25,7 +25,7 @@ it only acts when called, so a second copy that nobody calls does nothing.
 
 | | |
 |---|---|
-| Repo pipeline | onboarding-service#9: `pr.yml` (title, `go vet`, `go test -race`), `build.yml` (`sha-<7>` images), `release.yml` (release-please, `kthais-release`), `CODEOWNERS` `@kthaisociety/it-team` |
+| Repo pipeline | onboarding-service#9: `pr.yml` (title, `go vet`, `go test -race`), `build.yml` (`sha-<7>` images), `release.yml` (release-please, `kthais-release`), `CODEOWNERS` `@sammosios` (first `@kthaisociety/it-team`, which emailed the whole team on every PR) |
 | Image | `ghcr.io/kthaisociety/onboarding-service`, public (the repo is public). First image: `sha-3b6e8e5@sha256:d3370c24f6e2051a0ea594e31f7bd36d17565399580ebf184024ceed8869c002` |
 | OpenBao side | `infrastructure` `terraform/openbao/projects.yaml`: `onboarding-service` with `shared: [onboarding-service-secret]` (#17) |
 | Dokploy side | `deployments` `projects/onboarding-service/` (deployments#1): project `onboarding-service`, `staging` and `production`, vault providers `onboarding-service-<env>` |
