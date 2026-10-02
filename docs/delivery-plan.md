@@ -20,6 +20,9 @@ GitHub App) on hold: onboarding-service moves straight to this model instead.
   Production runs a semver release that a code owner approved, with a changelog in the app's repo.
 - **The platform stays strict; deployments can move fast.** Bot commits and frequent changes live in a
   repo that can't touch the underlying infrastructure.
+- **Public by design.** Repos and images are public unless there's a specific reason not to be
+  (decided 2026-10-02). Secrets live in OpenBao and GitHub secrets, never in a repo or an image, so being
+  public costs nothing, and it's what makes rulesets and org secrets work on GitHub Free.
 
 ## Decisions
 
@@ -27,7 +30,7 @@ GitHub App) on hold: onboarding-service moves straight to this model instead.
 
 | | `infrastructure` (this repo) | `deployments` (new) |
 |---|---|---|
-| Holds | The platform: GleSYS storage, OpenBao (its deployment, auth methods, admin policies, KV mount, token role, snapshots), Dokploy core (registry credentials, backup destination, notifications) | Every project: `project.yaml`, the image each environment runs, `modules/project` and `modules/project-secrets` |
+| Holds | The platform: GleSYS storage, OpenBao (its deployment, auth methods, admin policies, KV mount, token role, snapshots), Dokploy core (backup destination, notifications) | Every project: `project.yaml`, the image each environment runs, `modules/project` and `modules/project-secrets` |
 | Changes | Rare, reviewed by infra admins | Frequent: tag bumps by a bot, project config by PR |
 | Who writes | Humans, by PR | Humans by PR; the deploy bot through its own PRs, which only change image files |
 | CI's OpenBao rights | `terraform`: everything | Only what projects need: `dokploy-project-*` policies, tokens from the `dokploy-provider` role, secret **metadata** (empty paths). Not `infrastructure/*`, auth methods, admin policies or the token role |
@@ -64,8 +67,14 @@ How the move keeps everything working:
 
 `deployments` is one root module with both providers (OpenBao and Dokploy), so a project's policy,
 token, vault provider and app are created in one apply, in order. That removes the "new project has no
-token on the PR plan" problem the two-root setup has. It reads what it needs from `infrastructure`'s
-state (Dokploy registry id, backup destination id) through `terraform_remote_state`.
+token on the PR plan" problem the two-root setup has.
+
+**Its state is separate from `infrastructure`'s** (decided 2026-10-02): its own GleSYS object storage
+instance, credential and bucket (made by `terraform/glesys`), and its own encryption passphrase.
+GleSYS credentials are per instance, so sharing `kthais-tfstate` would let `deployments`' CI read and
+overwrite `infrastructure`'s state, which holds OpenBao tokens and GleSYS keys. For the same reason
+it **doesn't read `infrastructure`'s state**: the few values it needs (e.g. the backup destination's id)
+are non-secret ids in its own config, or looked up through the Dokploy provider's data sources.
 
 ### Semantic commits, enforced
 
@@ -96,7 +105,7 @@ Every app repo (and both infra repos) uses [Conventional Commits](https://www.co
 Per app repo, with [release-please](https://github.com/googleapis/release-please) (decided, open question
 5). One release PR per repo at a time: each merge to `main` creates it or adds to it, so any number of
 feature PRs end up in one release, and feature PRs never wait for it. release-please runs with the
-**release App**'s token, not `GITHUB_TOKEN`: GitHub runs no workflows for events made with
+**`kthais-release`** App's token, not `GITHUB_TOKEN`: GitHub runs no workflows for events made with
 `GITHUB_TOKEN`, so the release PR would never get its required checks and could never be merged.
 
 1. As `feat:`/`fix:` commits land on `main`, the release bot keeps one open **release PR**: the next
@@ -121,12 +130,14 @@ runs where.
   report the digest, then ask `deployments` to deploy it to `staging` (if any).
 - Pushing uses the repo's own `GITHUB_TOKEN` (`packages: write`); no extra secret.
 - Each GHCR package grants write only to its own repo, so no repo can publish another app's image.
-- **Images are private** (decided 2026-10-02). Dokploy pulls with one read-only credential, stored once
-  as a Dokploy registry (`password_wo`) in `infrastructure`: a classic personal access token with only
-  `read:packages`, from a machine user account. GHCR accepts only classic tokens (and `GITHUB_TOKEN` inside
-  Actions), so neither a fine-grained token nor a GitHub App works: an App's tokens also expire after an
-  hour, and Dokploy stores a fixed password. The machine account is a member with read access to the
-  packages and nothing else; its token lives in 1Password and the `production` environment.
+- **Images are public**, like the repos they're built from (decided 2026-10-02, replacing "private"):
+  an image holds nothing its public repo doesn't, and never a secret (config and secrets come from env
+  at deploy time). So Dokploy pulls with no credential at all: no pull token, no Dokploy registry entry,
+  no machine account. Each package's visibility is set to public once, after its first build (see
+  app-delivery.md, "Adding a new app").
+  If an app ever needs a private image: GHCR accepts only a classic personal access token
+  (`read:packages`) for pulls, from a user account; neither fine-grained tokens nor GitHub App tokens
+  work, and an App token would expire within the hour anyway.
 
 ### The deploy bot: declarative, in git
 
@@ -150,7 +161,7 @@ staging: ghcr.io/kthaisociety/onboarding-service:sha-3f2c1ab@sha256:…
 3. It opens a PR that changes only that project's line in `release.yaml`, with a semantic title
    (`deploy(onboarding-service): production 1.4.0`). The required checks run on it, plus one more:
    `bot-scope`, which fails if a bot PR touches anything but `projects/*/release.yaml`. When they pass,
-   the deploy App merges it (squash; GitHub signs the merge commit).
+   `kthais-deploy` merges it (squash; GitHub signs the merge commit).
 4. The merge to `main` applies, in one concurrency group. The image change redeploys the app; a failed
    deploy fails that apply run.
 5. **`deploy.yml` waits for that apply and ends with its result.** It finds the apply run by the merge
@@ -165,17 +176,18 @@ staging: ghcr.io/kthaisociety/onboarding-service:sha-3f2c1ab@sha256:…
 
 Rulesets on `deployments`' `main`: one ruleset with signatures, linear history and the required checks
 (`bot-scope` included), which nobody bypasses; a second one requiring a human approval, which only the
-deploy App bypasses. So the bot skips review, never the checks, and only for image lines.
+`kthais-deploy` bypasses. So the bot skips review, never the checks, and only for image lines.
 
 OpenTofu reads the image from `release.yaml` and doesn't ignore any part of it: what's in git is what
 runs, and a manual redeploy of some other image is drift the next apply undoes.
 
 Two credentials, kept apart:
-- **Trigger:** one org-owned GitHub App with `actions: write` on `deployments` only, its key an org secret
-  for app repos. It can ask for a deploy of an existing tag and nothing else; `deploy.yml` does the
-  checking.
-- **Deploy App:** used only inside `deployments`' own workflow, to open and merge the bot PRs
-  (`contents` and `pull-requests: write` on `deployments`). Its key never leaves that repo.
+- **`kthais-dispatch`:** `actions: write` on `deployments` only (installed there), its key in the org
+  secrets `DISPATCH_APP_CLIENT_ID` / `DISPATCH_APP_PRIVATE_KEY`, visible to the app repos. It can ask for
+  a deploy of an existing tag and nothing else; `deploy.yml` does the checking.
+- **`kthais-deploy`** (App ID 5165860): `contents` and `pull-requests: write` on `deployments` only, used
+  only by that repo's own workflows to open and merge the bot PRs. Its key is a repo secret there
+  (`DEPLOY_APP_CLIENT_ID` / `DEPLOY_APP_PRIVATE_KEY`) and never leaves it.
 
 ## Build order
 
@@ -186,8 +198,8 @@ Two credentials, kept apart:
    (imports, new tokens), then `infrastructure` (keeps the rest, revokes old tokens). Check both plans
    show no destroy or replace outside the old tokens. The first apply is also the test of open
    question 3: if `cicd-bot` can't create a vault provider, it fails there.
-3. **GHCR pull credential** as a Dokploy registry in `infrastructure` (verify item 4: does a registry
-   alone let Dokploy pull, or does each app need it set).
+3. ~~GHCR pull credential~~: not needed, images are public. Verify instead that Dokploy pulls a public
+   GHCR image with no registry set (verify item 4, reworded).
 4. **Reusable workflows**: semantic PR titles, build, release. Then onboarding-service adopts them:
    rulesets, `CODEOWNERS`, first image, first release `1.0.0`.
 5. **`deploy.yml` and the GitHub App.** Until it exists, `release.yaml` is bumped by hand in a PR.
@@ -204,7 +216,7 @@ Two credentials, kept apart:
 **Every new app is added by hand to each App's installation and to its secrets' repository access**
 (see [app-delivery.md](app-delivery.md), "Adding a new app"). Nothing is scoped to "all repositories":
 a secret is readable by every workflow in every repo it's visible to, so "all" would let any repo in the
-org, including side projects, read the release App's key and act on every app repo.
+org, including side projects, read `kthais-release`'s key and act on every app repo.
 
 **GitHub Free limits** (checked 2026-10-02), which is why app repos and `deployments` are public:
 - Rulesets and branch protection: public repos only. Organization-wide rulesets: GitHub Team and up,
@@ -215,32 +227,39 @@ org, including side projects, read the release App's key and act on every app re
 Every non-human identity in this plan is **created by hand**: GitHub has no API to create a user
 account, a GitHub App's private key is only downloadable once from its settings, and Dokploy only lets
 the organization owner set a member's permissions and only the user itself create its API keys. What
-OpenTofu can manage is where those credentials are used (e.g. the Dokploy registry entry, with
-`password_wo` from a `production` secret), not the accounts themselves.
+OpenTofu can manage is where those credentials are used (e.g. a `*_wo` attribute fed from a
+`production` secret), not the accounts themselves.
 
 So they're documented instead, in `docs/bot-accounts.md` (written with the step that creates each one):
-per account, why it exists, its exact permissions, where its credentials are stored (1Password item,
-GitHub environment secret), how to rotate them, and what breaks if they expire or are revoked.
+per account, why it exists, its exact permissions, where its credentials are stored, how to rotate them,
+and what breaks if they expire or are revoked.
+
+**GitHub App private keys are not kept anywhere but their GitHub secret** (decided 2026-10-02). An App
+can hold several valid keys, and an org owner can generate one at any time, so a copy in 1Password would
+only add a place to leak from. Rotating, for a leak or routinely: generate a new key on the App's page,
+`gh secret set` it, delete the old key, which stops working at once. The Client IDs aren't secret and
+are recorded in `bot-accounts.md`.
+
+**Re-running an old run must not roll back.** `kthais-dispatch` (held by every app repo) has
+`actions: write` on `deployments`, which also allows re-running past runs, and a re-run uses its original
+commit. So every apply in `deployments` first checks that its commit is still the tip of `main`, and
+refuses otherwise; a re-run of an old apply then does nothing.
 
 | Identity | Kind | Used for | Created in step |
 |---|---|---|---|
-| GHCR pull account (e.g. `kthais-cicd`) | GitHub user, classic token `read:packages` | Dokploy pulling private images | 3 |
 | `cicd-bot` | Dokploy user, `member` role, API key | `deployments`' applies | 2 |
 | `deployments` CI login | OpenBao JWT role (in `infrastructure`) | `deployments`' OpenBao changes | 2 (as code) |
-| Trigger App | GitHub App, `actions: write` on `deployments` | App repos requesting deploys | 5 |
-| Deploy App | GitHub App, `contents`/`pull-requests: write` on `deployments` | Opening and merging bot PRs | 5 |
-| Release App (`kthais-release`, created 2026-10-02) | GitHub App, org-owned; `contents`, `pull-requests`, `issues: write`; installed on selected app repos | release-please's release PRs, so their checks run | 4 |
+| `kthais-release` (created 2026-10-02) | GitHub App, org-owned; `contents`, `pull-requests`, `issues: write`; installed on selected app repos; org secrets `RELEASE_APP_*` for those repos | release-please's release PRs, so their checks run | 4 |
+| `kthais-dispatch` (created 2026-10-02) | GitHub App, org-owned; `actions: write`; installed on `deployments` only; org secrets `DISPATCH_APP_*` for the app repos | App repos requesting deploys | 5 |
+| `kthais-deploy` (created 2026-10-02, App ID 5165860) | GitHub App, org-owned; `contents`, `pull-requests: write`; installed on `deployments` only; repo secrets `DEPLOY_APP_*` there | Opening and merging bot PRs; the only bypass of `deployments`' review ruleset | 5 |
 
-Until the GHCR pull account exists, a classic `read:packages` token from an infra admin's own account
-can stand in. It's stored in one place (the `production` environment), so switching is one secret; its
-1Password item says "temporary, tied to <name>".
+No GHCR pull account: images are public (see "Builds").
 
 ## Open questions
 
-1. ~~Private or public images.~~ **Private** (2026-10-02), with a classic `read:packages` token.
-2. ~~A machine GitHub account.~~ **Yes, created by hand** for the pull token (see "Bot accounts and
-   credentials"). It has to be a user account, not a GitHub App (see "Builds"). An admin's own token
-   can stand in until it exists.
+1. ~~Private or public images.~~ **Public** (2026-10-02; first decided private, reversed the same day
+   when the repos went public by design).
+2. ~~A machine GitHub account.~~ **Not needed**: it was only for pulling private images.
 3. **Dokploy permissions for `deployments`.** Decided: its own `member` Dokploy user, `cicd-bot`, with
    create projects/services/environments and API access, and no access to the `infrastructure`
    project. Not tested ahead (decided 2026-10-02): whether a member can create vault providers. The
