@@ -128,8 +128,8 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 ### 2.6 First deploy, to staging
 - PR to `deployments` setting `release.yaml`'s `staging:` to `ghcr.io/kthaisociety/<repo>:sha-<7>@sha256:<digest>`
   (digest from the `build` run's summary, or the registry). Merge: the app switches from the placeholder
-  to the image and deploys, volumes already attached. (To confirm on onboarding-service's first staging
-  deploy: that this change deploys by itself. If not, press Deploy once in Dokploy.)
+  to the image and deploys by itself, volumes already attached (confirmed on onboarding-service's first
+  staging deploy, 2026-10-02: no Deploy click needed).
 - **Done when:** the deploy succeeds (every `${{vault…}}` reference resolved; a missing key fails the
   deploy), the app logs look right, and it answers on `http://<app name>:<port>` from `dokploy-network`.
 

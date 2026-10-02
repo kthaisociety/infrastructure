@@ -56,13 +56,16 @@ for the shared secret.
   ```
   Lengths after: 404, 25, 44.
 
-### 3. Dokploy side — deployments#1
+### 3. Dokploy side — done (deployments#1, 2026-10-02)
+The first apply stopped at the vault providers: the `Deployments CI` user was a member, which can't
+create them; made an admin, re-run, done.
 Merge: project, environments, provider tokens, vault providers (connection tested), and both apps with
 their `/data` mounts, not deployed (placeholder image). Check in Dokploy: project `onboarding-service`
 with `staging` and `production`, an app in each (idle), and both providers under Settings → Secrets.
 
-### 4. Staging
-PR to `deployments`:
+### 4. Staging — done (deployments#2, 2026-10-02)
+Deployed by itself on merge (placeholder → image, no Deploy click), pulled from GHCR with no
+credentials, references resolved, running. PR to `deployments`:
 ```yaml
 staging: ghcr.io/kthaisociety/onboarding-service:sha-3b6e8e5@sha256:d3370c24f6e2051a0ea594e31f7bd36d17565399580ebf184024ceed8869c002
 ```

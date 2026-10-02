@@ -202,14 +202,14 @@ Two credentials, kept apart:
    OpenBao login (#16), project policies in `infrastructure`'s `projects.yaml` (#17), OpenTofu root and
    `modules/project` with weekly apply and the stale-commit guard (deployments#1). Its first apply is the
    test of open question 3.
-3. ~~GHCR pull credential~~ — not needed: images of public repos are public. Dokploy pulling one with
-   no registry is checked on the first staging deploy (verify item 4, reworded).
+3. ~~GHCR pull credential~~ — not needed: images are public. Confirmed 2026-10-02: Dokploy pulled
+   onboarding-service's image for staging with no registry set (verify item 4).
 4. **Reusable workflows** — built: `kthaisociety/workflows` `v0.1.0` (semantic PR titles, build,
    release). onboarding-service adopted them (onboarding-service#9): first image pushed; first release
    pending (needs a `Release-As:` commit); its ruleset still lacks the PR and check rules.
 5. **`deploy.yml`** — not yet. Until it exists, deploying is a one-line `release.yaml` PR.
-6. **onboarding-service on the new project** — in progress, steps in
-   [onboarding-service-migration.md](onboarding-service-migration.md).
+6. **onboarding-service on the new project** — staging running (2026-10-02); production is the
+   switchover, steps in [onboarding-service-migration.md](onboarding-service-migration.md).
 7. The next projects, one at a time: landingpage-backend (needs Postgres and a domain in
    `modules/project`), then the rest.
 8. **[`docs/app-delivery.md`](app-delivery.md)** — written 2026-10-02 against what exists, each part
