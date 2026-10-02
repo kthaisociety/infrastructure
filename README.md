@@ -9,6 +9,8 @@ Dokploy projects and the images they run) are in
   how to add one. Start here.
 - [docs/delivery-plan.md](docs/delivery-plan.md): the design behind it, and the decisions made.
 - [docs/bot-accounts.md](docs/bot-accounts.md): every bot identity and credential, and how to rotate it.
+- [docs/app-migration.md](docs/app-migration.md): moving an existing app off the Dokploy UI onto the
+  pipeline, step by step: repo, bots, secrets, `deployments`, databases, data copy, switchover.
 - [docs/onboarding-service-migration.md](docs/onboarding-service-migration.md): the first app moved.
 - [docs/plan.md](docs/plan.md): the platform's plan (OpenBao, state, disaster recovery);
   [docs/openbao-deploy.md](docs/openbao-deploy.md): how OpenBao was deployed;

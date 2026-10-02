@@ -33,6 +33,9 @@ deploy is a one-line PR to the project's `release.yaml` in `deployments` (sectio
 
 ## 2. Adding a new app
 
+Moving an **existing** app off the Dokploy UI (inventory, data copy, switchover):
+[app-migration.md](app-migration.md), which builds on the steps below.
+
 In order. Each step says what "done" looks like.
 
 ### 2.1 The app repo
