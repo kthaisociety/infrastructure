@@ -70,8 +70,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          if gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename' \
-              | grep -qE '^(terraform/|\.github/workflows/tofu\.yml$)'; then
+          # Its own command, so a failed request fails this job (bash -e) instead of reading as "no
+          # terraform changes". previous_filename: a file moved out of terraform/ changes it too.
+          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)')
+          echo "$files"
+          if grep -qE '^(terraform/|\.github/workflows/tofu\.yml$)' <<<"$files"; then
             echo "terraform=true" >> "$GITHUB_OUTPUT"
           else
             echo "terraform=false" >> "$GITHUB_OUTPUT"
