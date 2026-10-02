@@ -15,7 +15,7 @@ locals {
 }
 
 resource "vault_policy" "this" {
-  name = "dokploy-project-${local.name}"
+  name = "${var.policy_prefix}${local.name}"
   policy = join("\n", concat(
     [<<-EOT
       path "${var.mount}/data/${local.path}" {

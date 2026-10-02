@@ -80,6 +80,18 @@ resource "vault_token_auth_backend_role" "dokploy_provider" {
   allowed_policies_glob   = ["dokploy-project-*"]
 }
 
+# The infrastructure project's provider token (snapshots.tf): its own role and exact policy, outside the
+# dokploy-project-* glob, so kthaisociety/deployments' CI (which may use dokploy-provider) can never mint
+# a token that reads secret/infrastructure/*.
+resource "vault_token_auth_backend_role" "dokploy_provider_infrastructure" {
+  role_name               = "dokploy-provider-infrastructure"
+  orphan                  = true
+  renewable               = true
+  token_period            = 768 * 3600
+  token_no_default_policy = true
+  allowed_policies        = ["dokploy-infrastructure-production"]
+}
+
 # People: Google sign-in (oidc.tf), or userpass from inside the container. Reads and writes app secrets,
 # never infrastructure/*, and can manage userpass users only as infra-admins bound to the container.
 resource "vault_policy" "infra_admin" {

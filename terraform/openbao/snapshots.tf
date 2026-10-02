@@ -44,11 +44,12 @@ resource "vault_token" "openbao_snapshots" {
 module "infrastructure_secrets" {
   source = "../modules/project-secrets"
 
-  project     = "infrastructure"
-  environment = "production"
-  mount       = vault_mount.secret.path
-  token_role  = vault_token_auth_backend_role.dokploy_provider.role_name
-  create_path = false
+  project       = "infrastructure"
+  environment   = "production"
+  mount         = vault_mount.secret.path
+  token_role    = vault_token_auth_backend_role.dokploy_provider_infrastructure.role_name
+  policy_prefix = "dokploy-"
+  create_path   = false
 }
 
 locals {
