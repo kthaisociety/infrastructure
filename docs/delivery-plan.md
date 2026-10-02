@@ -51,8 +51,9 @@ Why split:
 - **Noise.** Tag bumps would bury platform changes in `infrastructure`'s history.
 
 What stays in `infrastructure` (decided after Greptile on #16): each project's OpenBao side,
-`modules/project-secrets`, now policy and empty secret paths only, from a project list in
-`terraform/openbao`. Adding a project is one line there, then its folder in `deployments`. What moves to
+`modules/project-secrets`, now policy and empty secret paths only, from `terraform/openbao/projects.yaml`.
+Adding a project is one line there (`my-app: {}`), then its folder in `deployments`, whose checks fail
+until that line exists. What moves to
 `deployments`: the provider tokens (minted there) and everything Dokploy (`modules/project`).
 
 How the move keeps everything working:

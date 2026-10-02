@@ -381,6 +381,11 @@ change `bao-blocked` to an allowlist before retrying.
 ## Part D: Configure OpenBao as code
 
 ### D1. The first project folder
+
+> **Superseded (2026-10-02):** projects' OpenBao side is now one line each in
+> `terraform/openbao/projects.yaml` (`my-app: {}`), and everything else about a project is in
+> `kthaisociety/deployments`. See [app-delivery.md](app-delivery.md), "Adding a new app". The rest of
+> this section is the history of Part D.
 Each project is a folder, `terraform/projects/<project>/project.yaml` (plan, "Projects are folders").
 The first is **onboarding-service**. It moves to a new Dokploy project built by OpenTofu rather than
 being wired into the UI-managed one (plan, "Existing projects are rebuilt, not imported"), so its folder

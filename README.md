@@ -10,7 +10,7 @@ Core KTHAIS infrastructure as code, with OpenTofu. See [docs/plan.md](docs/plan.
 | `terraform/glesys/` | Object storage instances, credentials and buckets (state, OpenBao snapshots, backups) | Applied |
 | `terraform/dokploy/` | Dokploy core (registry, secrets providers, backups, notifications), OpenBao (`bao.kthais.com`) and its snapshots, and every project | OpenBao only (applied, public) |
 | `terraform/openbao/` | OpenBao config: KV mount, GitHub and Google logins, per project-environment policies and tokens | Applied |
-| `terraform/projects/` | One folder per project; its `project.yaml` is read by both roots | `onboarding-service` (OpenBao side) |
+| `terraform/openbao/projects.yaml` | Every project's OpenBao side: one line per project (its policies and empty secret paths). The rest of a project is in [kthaisociety/deployments](https://github.com/kthaisociety/deployments) | `onboarding-service` |
 | `terraform/modules/` | `project-secrets` (OpenBao side of a project) and `project` (Dokploy side, per project type) | `project-secrets` written; `project` not written yet |
 | `.github/workflows/deploy.yml` | Deploys: app repos push images to GHCR and ask this repo to deploy; it commits the tag and applies | _Not written yet_ |
 | `terraform/gcp/` | GCP projects, OAuth clients | _Later_ |
