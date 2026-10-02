@@ -29,7 +29,7 @@ release PR ──merge (code owner)──▶ vX.Y.Z + GitHub Release
   (the exact image per environment), and `deploy.yml`.
 - **OpenBao** (`bao.kthais.com`): secret values, at `secret/<project>/<environment>`.
 - **Dokploy**: runs the images. Never builds, never decides what runs.
-- **Bots**: release App, trigger App, deploy App, `cicd-bot`, GHCR pull account (see
+- **Bots**: release App, trigger App, deploy App, `cicd-bot` (see
   [bot-accounts.md](bot-accounts.md)).
 
 ## 2. Adding a new app
@@ -44,8 +44,10 @@ A checklist, in order, with who does each step and what "done" looks like.
 - `CODEOWNERS`: who approves releases.
 - Ruleset on `main`: PRs only, squash only, signed commits, required checks (title, tests); release PR
   requires a code owner.
-- **The repo must be public.** The org is on GitHub Free: rulesets and org secrets don't work for
-  private repos.
+- **The repo must be public** (public by design; also, the org is on GitHub Free, where rulesets and org
+  secrets don't work for private repos).
+- **After the first build, make the image public**: org → Packages → `<repo>` → Package settings →
+  Danger Zone → Change visibility → Public. Dokploy pulls with no credentials.
 - **Add the repo to each GitHub App's scope, and to its secrets.** Nothing is "all repositories", on
   purpose: a secret is readable by every workflow in every repo it's visible to, and an App's key works
   on every repo it's installed on.
