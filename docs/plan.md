@@ -819,9 +819,9 @@ admins.
 - **Per-project owners** don't need the identity service: an `owners:` list of emails in a project's
   `project.yaml` becomes an OIDC role scoped to that project's KV paths, made by
   `modules/project-secrets`. Every access change stays a reviewed PR here.
-- **The [identity service](identity-service.md)**, once it exists and verifies Google sign-ins correctly
-  (its Step 1), can replace Google as OpenBao's OIDC issuer, with the same roles. Decide then whether
-  groups come from its tokens or stay as emails in `project.yaml`.
+- **The [identity service](https://github.com/kthaisociety/identity-service)**, once it exists, can
+  replace Google as OpenBao's OIDC issuer, with the same roles. Decide then whether groups come from its
+  tokens or stay as emails in `project.yaml`.
 - **People never get `sys/`.** Mounts, policies and auth stay with CI, which logs in with GitHub's OIDC
   and depends on neither Google nor the identity service.
 - **`userpass` stays** as the break-glass login inside the container.
@@ -848,8 +848,9 @@ above, and nothing above depends on it. When we pick it up:
   through the API. That's fine: the identity service will be the only Google OAuth client, with only
   its own callback URLs registered in Google. It's created by hand once. Projects become clients of the
   identity service instead, and their allowed return URLs are an exact-match allowlist in the identity
-  service's config, in code. See [identity-service.md](identity-service.md).
-- **Good candidates:** service accounts apps use (e.g. onboarding-service's Workspace admin account),
+  service's config, set through env. See [identity-service.md](identity-service.md).
+- **Good candidates:** service accounts apps use (e.g. the Workspace admin account, which moves from
+  onboarding-service to the identity service),
   enabled APIs, and IAM. Key creation and domain-wide delegation in the Workspace admin console stay
   manual.
 - Existing projects, such as the one holding the kthais.com sign-in client, would be imported.
