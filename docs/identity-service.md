@@ -12,13 +12,17 @@ This page keeps only what concerns this repo: Google OAuth clients, GCP, and dep
 
 The service runs two listeners
 ([ADR 0003](https://github.com/kthaisociety/identity-service/blob/main/docs/adr/0003-two-listeners.md)):
-a public one for sign-in and an internal one for the admin API. Deploying it needs what the pipeline
-doesn't support yet:
+a public one for sign-in and an internal one for the admin API. It registers like any other project
+([app-delivery.md](app-delivery.md), 2.2 and 2.4):
 
-- **Postgres** for the project in `kthaisociety/deployments`.
+- **Here:** one line in `terraform/openbao/projects.yaml`.
+- **In `kthaisociety/deployments`:** `projects/identity-service/project.yaml` and `release.yaml`.
+
+Deploying it also needs what the pipeline doesn't support yet:
+
+- **Postgres** for the project.
 - **A public domain** (e.g. `auth.kthais.com`) for the public listener only. The internal listener never
   gets a domain.
-- **The project's entries** in `projects.yaml` here and in `deployments`.
 
 ## Google OAuth clients today
 
