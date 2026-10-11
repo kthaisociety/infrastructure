@@ -34,7 +34,8 @@ From the 2026-09-26 GCP audit (`~/kthais/gcp-project-audit-2026-09-26.md`):
 | Mattermost (chat.aisociety.se) | `mattermost-423409` | vilhelm only |
 
 The identity service gets a **new** Google OAuth client in a **new GCP project defined in
-`terraform/gcp`**, owned by a Google group rather than one person. As far as we know, Google has no API
+`terraform/gcp`** (`kthais-identity`, see [gcp.md](gcp.md)), owned by a Google group rather than one
+person. As far as we know, Google has no API
 for creating standard OAuth client IDs, so the project, its APIs and IAM are in code, and the client
 itself is created by hand once in that project. Its authorized redirect URIs are only the identity
 service's own callbacks, one per environment.
