@@ -12,10 +12,10 @@
 # the bare word (docs/gcp.md, "Why the IDs start with kthais-").
 
 locals {
-  # The hand-made project and CI's two accounts in it. Written only here.
-  provisioner = "kthais-provisioner"
-  ci_plan     = "serviceAccount:tofu-plan@${local.provisioner}.iam.gserviceaccount.com"
-  ci_apply    = "serviceAccount:tofu-apply@${local.provisioner}.iam.gserviceaccount.com"
+  # CI's two accounts in the hand-made project. The workflow that signs in as them passes the project's
+  # ID and the accounts' names in, so none of the three is written here.
+  ci_plan  = "serviceAccount:${var.plan_account}@${var.provisioner_project}.iam.gserviceaccount.com"
+  ci_apply = "serviceAccount:${var.apply_account}@${var.provisioner_project}.iam.gserviceaccount.com"
 
   projects = {
     # The identity service's project: the one Google sign-in client every KTHAIS app goes through, and

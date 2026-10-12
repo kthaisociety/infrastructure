@@ -13,7 +13,7 @@ The organization is being reduced to three projects:
 
 | Name | ID | How it's made | What it holds |
 |---|---|---|---|
-| provisioner (likely) | `kthais-provisioner` | By hand, once. The only project that isn't in code | The accounts CI runs OpenTofu as, and the sign-in from GitHub Actions |
+| provisioner (likely) | set in `tofu.yml`, see below | By hand, once. The only project that isn't in code | The accounts CI runs OpenTofu as, and the sign-in from GitHub Actions |
 | identity | `kthais-identity` | By OpenTofu | The one Google sign-in client, used by the [identity service](identity-service.md), and the account that manages Google Workspace |
 | mattermost | `kthais-mattermost` | By OpenTofu | Mattermost's sign-in client |
 
@@ -84,22 +84,36 @@ and why the organization grew to 42 projects.
 Neither project is linked to a billing account, and neither needs one: sign-in clients and the APIs we
 use are free. When KTHAIS's central billing account exists
 ([plan.md](plan.md#later-gcp-as-code) has the steps), set `billing_account` in
-[`variables.tf`](../terraform/gcp/variables.tf) and, by hand, give `tofu-apply` the Billing Account User
-role on that account.
+[`variables.tf`](../terraform/gcp/variables.tf) and, by hand, give CI's apply account the Billing
+Account User role on that account.
 
 ## The provisioner project
 
 CI can't create the identity it signs in with, so this one project is made by hand and stays out of the
 code. That also means CI can't change its own sign-in, by mistake or otherwise.
 
+It holds two service accounts: the **plan account**, read-only, for PRs, and the **apply account**, for
+`main`.
+
+**The project's ID and the two accounts' names are written in one place:** `GCP_PROVISIONER_PROJECT`,
+`GCP_PLAN_ACCOUNT` and `GCP_APPLY_ACCOUNT` at the top of
+[`.github/workflows/tofu.yml`](../.github/workflows/tofu.yml). The gcp jobs build the accounts' addresses
+from them and pass them to `terraform/gcp`, and the commands below read them from there. None of the three
+can be changed once created, so settle those lines before running anything.
+
 Steps 1 and 2 can be run by any kthais.com account, which then owns the project. Step 3 needs an
-organization admin.
+organization admin. Run them from the root of this repo.
 
 1. The project, its APIs and the sign-in. CI's requests count against this project, so every API CI
    calls is enabled here. All are free.
 
    ```sh
-   P=kthais-provisioner   # "provisioner" is likely, not final
+   setting() { sed -n "s/^  $1: *//p" .github/workflows/tofu.yml; }
+   P=$(setting GCP_PROVISIONER_PROJECT)
+   PLAN=$(setting GCP_PLAN_ACCOUNT)
+   APPLY=$(setting GCP_APPLY_ACCOUNT)
+   echo "project: $P  accounts: $PLAN, $APPLY"   # what you're about to create, for good
+
    gcloud projects create "$P" --name="provisioner" --organization=914442966401
    gcloud services enable --project="$P" \
      cloudbilling.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com \
@@ -117,29 +131,28 @@ organization admin.
 2. The two service accounts, each usable from one environment of this repo:
 
    ```sh
-   gcloud iam service-accounts create tofu-plan --project="$P" \
+   gcloud iam service-accounts create "$PLAN" --project="$P" \
      --display-name="OpenTofu plan (GitHub Actions, read-only)"
-   gcloud iam service-accounts create tofu-apply --project="$P" \
+   gcloud iam service-accounts create "$APPLY" --project="$P" \
      --display-name="OpenTofu apply (GitHub Actions)"
 
    N=$(gcloud projects describe "$P" --format='value(projectNumber)')
    SUBJECT="principal://iam.googleapis.com/projects/$N/locations/global/workloadIdentityPools/github/subject/repo:kthaisociety@57193069/infrastructure@1397232852"
-   gcloud iam service-accounts add-iam-policy-binding "tofu-plan@$P.iam.gserviceaccount.com" \
+   gcloud iam service-accounts add-iam-policy-binding "$PLAN@$P.iam.gserviceaccount.com" \
      --project="$P" --role=roles/iam.workloadIdentityUser --member="$SUBJECT:environment:plan"
-   gcloud iam service-accounts add-iam-policy-binding "tofu-apply@$P.iam.gserviceaccount.com" \
+   gcloud iam service-accounts add-iam-policy-binding "$APPLY@$P.iam.gserviceaccount.com" \
      --project="$P" --role=roles/iam.workloadIdentityUser --member="$SUBJECT:environment:production"
    ```
 
-3. Let `tofu-apply` create projects in the organization:
+3. Let the apply account create projects in the organization:
 
    ```sh
    gcloud organizations add-iam-policy-binding 914442966401 --role=roles/resourcemanager.projectCreator \
-     --member="serviceAccount:tofu-apply@$P.iam.gserviceaccount.com"
+     --member="serviceAccount:$APPLY@$P.iam.gserviceaccount.com"
    ```
 
-4. Put the project number (`echo $N`) into `GCP_WORKLOAD_IDENTITY_PROVIDER` at the top of
-   `.github/workflows/tofu.yml`, and the project's ID into `local.provisioner` in `projects.tf` if it
-   isn't `kthais-provisioner`.
+4. Put the project number (`echo $N`) into `GCP_WORKLOAD_IDENTITY_PROVIDER`, the line below those three
+   in `.github/workflows/tofu.yml`. Nothing else needs the ID, the names or the number.
 
 ## How CI signs in
 
@@ -148,13 +161,13 @@ are no key files.
 
 | Job | GitHub environment | Becomes | May |
 |---|---|---|---|
-| `gcp-plan` (PRs) | `plan`: a reviewer approves each run | `tofu-plan` | read the projects in `terraform/gcp`: Viewer and Security Reviewer, granted in code |
-| `gcp-apply` (`main`) | `production`: `main` only | `tofu-apply` | create projects in the organization, and everything in the ones it created: Owner |
+| `gcp-plan` (PRs) | `plan`: a reviewer approves each run | the plan account | read the projects in `terraform/gcp`: Viewer and Security Reviewer, granted in code |
+| `gcp-apply` (`main`) | `production`: `main` only | the apply account | create projects in the organization, and everything in the ones it created: Owner |
 
 - Google accepts tokens from this repo only, matched by GitHub's org and repo IDs, not their names.
 - Each service account can be used from exactly one environment.
-- As owner of `kthais-identity` and `kthais-mattermost`, `tofu-apply` could read the sign-in clients'
-  secrets. `production` already holds secrets of that weight.
+- As owner of `kthais-identity` and `kthais-mattermost`, the apply account could read the sign-in
+  clients' secrets. `production` already holds secrets of that weight.
 - Neither account has any role in the provisioner project itself.
 
 **If CI can't sign in**, the cause is in the provisioner project or on GitHub's side, since nothing in

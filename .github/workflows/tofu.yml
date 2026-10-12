@@ -45,8 +45,15 @@ env:
   TOFU_VERSION: 1.12.6
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
-  # Where the gcp jobs sign in to Google Cloud: the hand-made provisioner project (docs/gcp.md). Not
-  # secret. The number is that project's number, which Google only accepts in this form.
+  # The hand-made provisioner project the gcp jobs sign in through, and CI's two accounts in it: one for
+  # PR plans, read-only, and one for applies on main (docs/gcp.md). Not secret. The project's ID and the
+  # accounts' names are written on the next three lines and nowhere else in this repo: the gcp jobs build
+  # the accounts' addresses from them and hand them to terraform/gcp as variables. docs/gcp.md's setup
+  # commands read these lines, so keep each as `NAME: value` with nothing after the value.
+  GCP_PROVISIONER_PROJECT: kthais-provisioner
+  GCP_PLAN_ACCOUNT: tofu-plan
+  GCP_APPLY_ACCOUNT: tofu-apply
+  # The same project by its number, which is the only form Google accepts here.
   GCP_WORKLOAD_IDENTITY_PROVIDER: projects/REPLACE_WITH_PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github
 
 jobs:
@@ -303,7 +310,8 @@ jobs:
     needs: [fmt, changes]
     runs-on: ubuntu-latest
     # See glesys-plan for the state credential. The Google sign-in is weaker than production's: a job in
-    # this environment can only become tofu-plan, which is read-only (docs/gcp.md, "How CI signs in").
+    # this environment can only become the plan account, which is read-only (docs/gcp.md, "How CI signs
+    # in").
     environment: plan
     permissions:
       contents: read
@@ -325,10 +333,14 @@ jobs:
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: tofu-plan@kthais-provisioner.iam.gserviceaccount.com
+          service_account: ${{ env.GCP_PLAN_ACCOUNT }}@${{ env.GCP_PROVISIONER_PROJECT }}.iam.gserviceaccount.com
       - run: tofu init
       - run: tofu validate
       - name: tofu plan
+        env:
+          TF_VAR_provisioner_project: ${{ env.GCP_PROVISIONER_PROJECT }}
+          TF_VAR_plan_account: ${{ env.GCP_PLAN_ACCOUNT }}
+          TF_VAR_apply_account: ${{ env.GCP_APPLY_ACCOUNT }}
         run: |
           tofu plan -lock=false -no-color | tee plan.txt
           {
@@ -363,6 +375,10 @@ jobs:
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: tofu-apply@kthais-provisioner.iam.gserviceaccount.com
+          service_account: ${{ env.GCP_APPLY_ACCOUNT }}@${{ env.GCP_PROVISIONER_PROJECT }}.iam.gserviceaccount.com
       - run: tofu init
       - run: tofu apply -auto-approve
+        env:
+          TF_VAR_provisioner_project: ${{ env.GCP_PROVISIONER_PROJECT }}
+          TF_VAR_plan_account: ${{ env.GCP_PLAN_ACCOUNT }}
+          TF_VAR_apply_account: ${{ env.GCP_APPLY_ACCOUNT }}

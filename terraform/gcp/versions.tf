@@ -43,7 +43,7 @@ terraform {
   }
 }
 
-# CI signs in with its GitHub Actions OIDC token, as tofu-plan on PRs and as tofu-apply on main
+# CI signs in with its GitHub Actions OIDC token, as a read-only account on PRs and as another on main
 # (docs/gcp.md, "How CI signs in"). There are no key files. No default project: every resource names
 # its own.
 provider "google" {}
