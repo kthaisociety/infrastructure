@@ -1,7 +1,9 @@
 # kthaisociety/deployments' CI login. It mints each project's Dokploy provider token, through the
-# dokploy-provider role, and does nothing else in OpenBao. In particular it can't write policies: a
-# dokploy-project-* policy's contents decide what a token minted with it can read, so those policies,
-# and the projects' empty secret paths, are written only by this repo (projects.tf).
+# dokploy-provider role, and writes the credentials of the databases it creates, at
+# secret/<project>/<env>/database/<engine>. Nothing else in OpenBao. In particular it can't write
+# policies: a dokploy-project-* policy's contents decide what a token minted with it can read, so those
+# policies, and the projects' empty secret paths, are written only by this repo (projects.tf). And it
+# can't write any secret a person fills in.
 #
 # What it can still do: mint a token with any project's policy, and so read app secrets. That's inherent
 # to wiring Dokploy's providers, and why the login is bound to deployments' production environment (main
@@ -9,8 +11,8 @@
 # infrastructure/* (separate role and policy, main.tf) or anything admin.
 
 resource "vault_policy" "deployments" {
-  name   = "deployments"
-  policy = <<-EOT
+  name = "deployments"
+  policy = join("\n", concat([<<-EOT
     # Provider tokens, only through dokploy-provider, which only grants existing dokploy-project-*
     # policies (written by kthaisociety/infrastructure).
     path "auth/token/create/dokploy-provider" {
@@ -30,7 +32,7 @@ resource "vault_policy" "deployments" {
       capabilities = ["update"]
     }
 
-    # Explicitly never: policies, other token roles, secrets.
+    # Explicitly never: policies, other token roles, secrets other than the database paths below.
     path "sys/policies/*" {
       capabilities = ["deny"]
     }
@@ -41,6 +43,21 @@ resource "vault_policy" "deployments" {
       capabilities = ["deny"]
     }
   EOT
+    ],
+    # Database credentials, one block per project environment in projects.yaml (projects.tf). Each path
+    # starts with the project's name, so these win over the secret/* deny above (its wildcard comes
+    # first) and can't match infrastructure/* or shared/* (not project names, modules/project-secrets).
+    # delete: removing an engine from a project's project.yaml destroys its secret.
+    [for p in local.database_paths : <<-EOT
+      path "secret/data/${p}/*" {
+        capabilities = ["create", "read", "update", "delete"]
+      }
+      path "secret/metadata/${p}/*" {
+        capabilities = ["read", "delete"]
+      }
+    EOT
+    ],
+  ))
 }
 
 resource "vault_jwt_auth_backend_role" "deployments_ci" {

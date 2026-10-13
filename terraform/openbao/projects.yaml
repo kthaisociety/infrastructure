@@ -1,5 +1,7 @@
 # Every project's OpenBao side: per environment, the policy dokploy-project-<project>-<env> and the empty
-# secret path secret/<project>/<env>, to fill in the OpenBao UI. Everything else about a project (its
+# secret path secret/<project>/<env>, to fill in the OpenBao UI. Under secret/<project>/<env>/database/,
+# kthaisociety/deployments' CI writes the credentials of the databases it creates; people can only read
+# those. Everything else about a project (its
 # Dokploy side, secret names, images) is in kthaisociety/deployments, whose checks fail until the
 # project is listed here.
 #

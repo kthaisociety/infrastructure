@@ -94,9 +94,11 @@ resource "vault_token_auth_backend_role" "dokploy_provider_infrastructure" {
 
 # People: Google sign-in (oidc.tf), or userpass from inside the container. Reads and writes app secrets,
 # never infrastructure/*, and can manage userpass users only as infra-admins bound to the container.
+# Database credentials are only read: deployments' CI generates them and Dokploy's databases use them, so
+# a hand edit would lock the app out of its database.
 resource "vault_policy" "infra_admin" {
-  name   = "infra-admin"
-  policy = <<-EOT
+  name = "infra-admin"
+  policy = join("\n", concat([<<-EOT
     path "secret/data/*" {
       capabilities = ["create", "read", "update", "patch", "delete", "list"]
     }
@@ -125,4 +127,17 @@ resource "vault_policy" "infra_admin" {
       capabilities = ["update"]
     }
   EOT
+    ],
+    # One block per project environment, not secret/data/+/+/database/*: that would lose to
+    # secret/data/* above (same first wildcard, more + segments), so it wouldn't narrow anything.
+    [for p in local.database_paths : <<-EOT
+      path "secret/data/${p}/*" {
+        capabilities = ["read"]
+      }
+      path "secret/metadata/${p}/*" {
+        capabilities = ["read", "list"]
+      }
+    EOT
+    ],
+  ))
 }

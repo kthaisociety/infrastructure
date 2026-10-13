@@ -88,7 +88,8 @@ In order. Each step says what "done" looks like.
 - One line in `terraform/openbao/projects.yaml`: `my-app: {}` (staging and production), or
   `my-app: { shared: [name] }` if it reads shared secrets, or `environments: [...]` for others.
 - PR, plan, merge. Creates per environment the policy `dokploy-project-<project>-<env>` and the empty path
-  `secret/<project>/<env>`.
+  `secret/<project>/<env>`. It also lets `deployments`' CI write `secret/<project>/<env>/database/*`, where
+  it puts the credentials of the databases it creates (IT-17, not built in `deployments` yet).
 - Why here: a policy's contents decide what a token can read, and `deployments`' CI can mint tokens;
   only this repo writes policies. `deployments`' `check` fails with exactly this line until it exists.
 - Needed again only for a new environment or a new shared secret. Not for new secrets, config or deploys.
@@ -99,6 +100,7 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 - Every name in `project.yaml`'s `secrets`, at `secret/<project>/staging` and `secret/<project>/production`;
   shared ones at `secret/shared/<name>/<env>`.
 - `put` for the first key on an empty path, `patch` after (a second `put` replaces the whole secret).
+- Not under `secret/<project>/<env>/database/`: `deployments`' CI writes those, and people can only read them.
 - Values through stdin, never as arguments; long values from the clipboard (a terminal paste is cut at
   1024 characters). `printf '%s' "$(pbpaste)"` drops only trailing newlines (a copy often adds one) and
   keeps internal ones, so multi-line values such as PEM keys arrive intact:
@@ -204,7 +206,8 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 - Projects: lowercase letters, digits, single hyphens; not `infrastructure` or `shared`. Environments:
   lowercase letters and digits only (names join as `<project>-<env>`, split at the last hyphen).
 - OpenBao: policy `dokploy-project-<project>-<env>`, path `secret/<project>/<env>`, shared
-  `secret/shared/<name>/<env>`.
+  `secret/shared/<name>/<env>`, database credentials `secret/<project>/<env>/database/<engine>` (written by
+  `deployments`' CI).
 - Dokploy: project `<project>`, vault provider `<project>-<env>`, app internal name
   `<project>-<env>-<6 random>` (Dokploy picks the suffix; the apply output `projects` shows it), volume
   `<project>-<env>-<name>`.
