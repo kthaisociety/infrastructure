@@ -54,7 +54,7 @@ env:
   GCP_PLAN_ACCOUNT: tofu-plan
   GCP_APPLY_ACCOUNT: tofu-apply
   # The same project by its number, which is the only form Google accepts here.
-  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/REPLACE_WITH_PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/1042272885972/locations/global/workloadIdentityPools/github/providers/github
 
 jobs:
   fmt:

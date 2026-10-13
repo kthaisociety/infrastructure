@@ -1,9 +1,8 @@
 # Google Cloud
 
-_Written 2026-10-11. **Not live yet:** nothing below has been created or applied. Still open, and
-none of it can be changed once created: whether "provisioner" is that project's final name, CI's service
-accounts (their names, and whether there are two) and the `workspace-admin` account's name. Also open:
-whether the two projects are owned by named people or by a Google group._
+_Written 2026-10-11. The provisioner project was made on 2026-10-12, so its ID and its two accounts'
+names are final. `kthais-identity` and `kthais-mattermost` are created by the first apply. Still open:
+whether those two are owned by named people or by a Google group._
 
 KTHAIS uses Google Cloud for almost nothing but sign-in. An audit of the kthais.com organization on
 2026-10-11 found 42 projects and, across all of them, no machines, buckets or databases that we run.
@@ -13,7 +12,7 @@ The organization is being reduced to three projects:
 
 | Name | ID | How it's made | What it holds |
 |---|---|---|---|
-| provisioner (likely) | set in `tofu.yml`, see below | By hand, once. The only project that isn't in code | The accounts CI runs OpenTofu as, and the sign-in from GitHub Actions |
+| provisioner | set in `tofu.yml`, see below | By hand, once. The only project that isn't in code | The accounts CI runs OpenTofu as, and the sign-in from GitHub Actions |
 | identity | `kthais-identity` | By OpenTofu | The one Google sign-in client, used by the [identity service](identity-service.md), and the account that manages Google Workspace |
 | mattermost | `kthais-mattermost` | By OpenTofu | Mattermost's sign-in client |
 
@@ -38,6 +37,10 @@ Every project that exists today is on its way out ([Projects being retired](#pro
 `terraform/gcp` creates `kthais-identity` and `kthais-mattermost`: the project, its owners, the APIs it
 needs, and in `kthais-identity` the `workspace-admin` service account. The list is `local.projects` in
 [`projects.tf`](../terraform/gcp/projects.tf).
+
+Google also turns on about twenty APIs of its own on every new project (BigQuery, Cloud Storage, Logging,
+Monitoring and others), on top of the ones we enable. They're free, we don't use them, and the code
+leaves them alone. The provisioner project has them too.
 
 A project's owners are exactly the members listed there, plus CI: someone made owner by hand is removed
 by the next apply. Other roles on a project aren't touched. For now the list is the two organization
@@ -90,7 +93,8 @@ Account User role on that account.
 ## The provisioner project
 
 CI can't create the identity it signs in with, so this one project is made by hand and stays out of the
-code. That also means CI can't change its own sign-in, by mistake or otherwise.
+code. That also means CI can't change its own sign-in, by mistake or otherwise. It was made on 2026-10-12
+with the steps below, which are kept so it can be rebuilt.
 
 It holds two service accounts: the **plan account**, read-only, for PRs, and the **apply account**, for
 `main`.
@@ -99,29 +103,39 @@ It holds two service accounts: the **plan account**, read-only, for PRs, and the
 `GCP_PLAN_ACCOUNT` and `GCP_APPLY_ACCOUNT` at the top of
 [`.github/workflows/tofu.yml`](../.github/workflows/tofu.yml). The gcp jobs build the accounts' addresses
 from them and pass them to `terraform/gcp`, and the commands below read them from there. None of the three
-can be changed once created, so settle those lines before running anything.
+can be changed once created.
 
 Steps 1 and 2 can be run by any kthais.com account, which then owns the project. Step 3 needs an
-organization admin. Run them from the root of this repo.
+organization admin. Run them from the root of this repo, in bash or zsh.
+
+Two things in the commands are there on purpose:
+
+- **`--billing-project`** makes gcloud count a request against the new project. Without it gcloud uses a
+  shared project of its own, which is rate-limited and refuses the sign-in commands outright, even for
+  the project's owner.
+- **Braces around every variable**, as in `${P}`. In zsh, the default shell on macOS,
+  `$SUBJECT:environment` is read as `$SUBJECT` with a modifier, and the value is lost.
 
 1. The project, its APIs and the sign-in. CI's requests count against this project, so every API CI
-   calls is enabled here. All are free.
+   calls is enabled here. All are free. The `echo` prints what is about to be created: check it before
+   going on.
 
    ```sh
-   setting() { sed -n "s/^  $1: *//p" .github/workflows/tofu.yml; }
+   setting() { sed -n "s/^  ${1}: *//p" .github/workflows/tofu.yml; }
    P=$(setting GCP_PROVISIONER_PROJECT)
    PLAN=$(setting GCP_PLAN_ACCOUNT)
    APPLY=$(setting GCP_APPLY_ACCOUNT)
-   echo "project: $P  accounts: $PLAN, $APPLY"   # what you're about to create, for good
+   echo "project: ${P}  accounts: ${PLAN}, ${APPLY}"
 
-   gcloud projects create "$P" --name="provisioner" --organization=914442966401
-   gcloud services enable --project="$P" \
+   gcloud projects create "${P}" --name="provisioner" --organization=914442966401
+   gcloud services enable --project="${P}" \
      cloudbilling.googleapis.com cloudresourcemanager.googleapis.com iam.googleapis.com \
      iamcredentials.googleapis.com serviceusage.googleapis.com sts.googleapis.com
 
-   gcloud iam workload-identity-pools create github --project="$P" --location=global \
-     --display-name="GitHub Actions"
-   gcloud iam workload-identity-pools providers create-oidc github --project="$P" --location=global \
+   gcloud iam workload-identity-pools create github --project="${P}" --billing-project="${P}" \
+     --location=global --display-name="GitHub Actions"
+   gcloud iam workload-identity-pools providers create-oidc github \
+     --project="${P}" --billing-project="${P}" --location=global \
      --workload-identity-pool=github --display-name="GitHub Actions" \
      --issuer-uri=https://token.actions.githubusercontent.com \
      --attribute-mapping=google.subject=assertion.sub \
@@ -131,28 +145,31 @@ organization admin. Run them from the root of this repo.
 2. The two service accounts, each usable from one environment of this repo:
 
    ```sh
-   gcloud iam service-accounts create "$PLAN" --project="$P" \
+   gcloud iam service-accounts create "${PLAN}" --project="${P}" --billing-project="${P}" \
      --display-name="OpenTofu plan (GitHub Actions, read-only)"
-   gcloud iam service-accounts create "$APPLY" --project="$P" \
+   gcloud iam service-accounts create "${APPLY}" --project="${P}" --billing-project="${P}" \
      --display-name="OpenTofu apply (GitHub Actions)"
 
-   N=$(gcloud projects describe "$P" --format='value(projectNumber)')
-   SUBJECT="principal://iam.googleapis.com/projects/$N/locations/global/workloadIdentityPools/github/subject/repo:kthaisociety@57193069/infrastructure@1397232852"
-   gcloud iam service-accounts add-iam-policy-binding "$PLAN@$P.iam.gserviceaccount.com" \
-     --project="$P" --role=roles/iam.workloadIdentityUser --member="$SUBJECT:environment:plan"
-   gcloud iam service-accounts add-iam-policy-binding "$APPLY@$P.iam.gserviceaccount.com" \
-     --project="$P" --role=roles/iam.workloadIdentityUser --member="$SUBJECT:environment:production"
+   N=$(gcloud projects describe "${P}" --billing-project="${P}" --format='value(projectNumber)')
+   SUBJECT="principal://iam.googleapis.com/projects/${N}/locations/global/workloadIdentityPools/github/subject/repo:kthaisociety@57193069/infrastructure@1397232852"
+   gcloud iam service-accounts add-iam-policy-binding "${PLAN}@${P}.iam.gserviceaccount.com" \
+     --project="${P}" --billing-project="${P}" --role=roles/iam.workloadIdentityUser \
+     --member="${SUBJECT}:environment:plan"
+   gcloud iam service-accounts add-iam-policy-binding "${APPLY}@${P}.iam.gserviceaccount.com" \
+     --project="${P}" --billing-project="${P}" --role=roles/iam.workloadIdentityUser \
+     --member="${SUBJECT}:environment:production"
    ```
 
 3. Let the apply account create projects in the organization:
 
    ```sh
-   gcloud organizations add-iam-policy-binding 914442966401 --role=roles/resourcemanager.projectCreator \
-     --member="serviceAccount:$APPLY@$P.iam.gserviceaccount.com"
+   gcloud organizations add-iam-policy-binding 914442966401 --billing-project="${P}" \
+     --role=roles/resourcemanager.projectCreator \
+     --member="serviceAccount:${APPLY}@${P}.iam.gserviceaccount.com"
    ```
 
-4. Put the project number (`echo $N`) into `GCP_WORKLOAD_IDENTITY_PROVIDER`, the line below those three
-   in `.github/workflows/tofu.yml`. Nothing else needs the ID, the names or the number.
+4. Put the project number (`echo "${N}"`) into `GCP_WORKLOAD_IDENTITY_PROVIDER`, the line below those
+   three in `.github/workflows/tofu.yml`. Nothing else needs the ID, the names or the number.
 
 ## How CI signs in
 
@@ -176,6 +193,10 @@ this repo can change the sign-in. Compare the project with the steps above and r
 ## Adding a project
 
 Add it to `local.projects`. The next apply creates it, with CI and the listed people as its owners.
+
+On the PR that adds it, `gcp-plan` can't read the new project yet: the plan account's Viewer and Security
+Reviewer roles on it are granted by this same code. The plan just shows the project as new, and the roles
+exist once that PR is applied.
 
 ## Projects being retired
 
