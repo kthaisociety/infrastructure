@@ -1,8 +1,8 @@
 # Google Cloud
 
-_Written 2026-10-11. The provisioner project was made on 2026-10-12, so its ID and its two accounts'
-names are final. `kthais-identity` and `kthais-mattermost` are created by the first apply. Still open:
-whether those two are owned by named people or by a Google group._
+_Written 2026-10-11. The provisioner project was made on 2026-10-12, and `kthais-identity` and
+`kthais-mattermost` were created by the first apply on 2026-10-13. Still open: whether those two are
+owned by named people or by a Google group._
 
 KTHAIS uses Google Cloud for almost nothing but sign-in. An audit of the kthais.com organization on
 2026-10-11 found 42 projects and, across all of them, no machines, buckets or databases that we run.
@@ -73,8 +73,10 @@ When a client is made, write its name and redirect addresses here.
 
 - **Its key.** A key made by OpenTofu would sit in state, so it's made in the console and put in OpenBao.
 - **Its right to act as a Workspace admin.** A Workspace super admin grants it in the Google Workspace
-  admin console (Security → API controls → Domain-wide delegation), to the client ID that
-  `terraform/gcp` outputs as `workspace_admin_client_id`. Nothing in Google Cloud shows or controls it.
+  admin console (Security → API controls → Domain-wide delegation), to the account's client ID,
+  `106879629454145161083`. Nothing in Google Cloud shows or controls it. The ID isn't secret. It changes
+  only if the account is ever made again, and `terraform/gcp` prints the current one as
+  `workspace_admin_client_id` on every apply.
 
 ### Access to the whole organization
 

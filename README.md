@@ -25,7 +25,7 @@ Dokploy projects and the images they run) are in
 | `terraform/openbao/` | OpenBao config: KV mount, GitHub and Google logins, token roles, policies, `deployments-ci` | Applied |
 | `terraform/openbao/projects.yaml` | Every project's OpenBao side, one line each (`my-app: {}`): its policies and empty secret paths | `onboarding-service` |
 | `terraform/modules/project-secrets/` | One project environment's policy, empty path (and, for now, a provider token) | Applied |
-| `terraform/gcp/` | The identity and Mattermost projects on Google Cloud: owners, APIs, service accounts | Written, not applied |
+| `terraform/gcp/` | The identity and Mattermost projects on Google Cloud: owners, APIs, service accounts. CI signs in through a third project, the only one made by hand ([docs/gcp.md](docs/gcp.md)) | Applied |
 
 State is stored encrypted in GleSYS Object Storage. Pull requests run checks and, after a reviewer
 approves, `tofu plan`; merges to `main` run `tofu apply` from the `production` environment. Nothing is
