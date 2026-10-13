@@ -12,6 +12,8 @@ Dokploy projects and the images they run) are in
 - [docs/app-migration.md](docs/app-migration.md): moving an existing app off the Dokploy UI onto the
   pipeline, step by step: repo, bots, secrets, `deployments`, databases, data copy, switchover.
 - [docs/onboarding-service-migration.md](docs/onboarding-service-migration.md): the first app moved.
+- [docs/gcp.md](docs/gcp.md): Google Cloud: the three projects we're moving to, what's in code, what's
+  made by hand, and how CI signs in.
 - [docs/plan.md](docs/plan.md): the platform's plan (OpenBao, state, disaster recovery);
   [docs/openbao-deploy.md](docs/openbao-deploy.md): how OpenBao was deployed;
   [docs/openbao-recovery.md](docs/openbao-recovery.md): root token or CI login trouble.
@@ -23,7 +25,7 @@ Dokploy projects and the images they run) are in
 | `terraform/openbao/` | OpenBao config: KV mount, GitHub and Google logins, token roles, policies, `deployments-ci` | Applied |
 | `terraform/openbao/projects.yaml` | Every project's OpenBao side, one line each (`my-app: {}`): its policies and empty secret paths | `onboarding-service` |
 | `terraform/modules/project-secrets/` | One project environment's policy, empty path (and, for now, a provider token) | Applied |
-| `terraform/gcp/` | GCP projects, OAuth clients | _Later_ |
+| `terraform/gcp/` | The identity and Mattermost projects on Google Cloud: owners, APIs, service accounts | Written, not applied |
 
 State is stored encrypted in GleSYS Object Storage. Pull requests run checks and, after a reviewer
 approves, `tofu plan`; merges to `main` run `tofu apply` from the `production` environment. Nothing is

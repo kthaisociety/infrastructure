@@ -2,6 +2,7 @@ name: tofu
 
 # One workflow for every root module, so applies run in dependency order:
 # glesys → openbao → dokploy (docs/plan.md, "Bootstrap order", for how the very first build differed).
+# gcp depends on none of them and nothing depends on it.
 
 on:
   # Every PR, not only those touching terraform/: fmt and openbao-validate are required checks, and a
@@ -44,6 +45,16 @@ env:
   TOFU_VERSION: 1.12.6
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
+  # The hand-made provisioner project the gcp jobs sign in through, and CI's two accounts in it: one for
+  # PR plans, read-only, and one for applies on main (docs/gcp.md). Not secret. The project's ID and the
+  # accounts' names are written on the next three lines and nowhere else in this repo: the gcp jobs build
+  # the accounts' addresses from them and hand them to terraform/gcp as variables. docs/gcp.md's setup
+  # commands read these lines, so keep each as `NAME: value` with nothing after the value.
+  GCP_PROVISIONER_PROJECT: kthais-provisioner
+  GCP_PLAN_ACCOUNT: tofu-plan
+  GCP_APPLY_ACCOUNT: tofu-apply
+  # The same project by its number, which is the only form Google accepts here.
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/1042272885972/locations/global/workloadIdentityPools/github/providers/github
 
 jobs:
   fmt:
@@ -293,3 +304,81 @@ jobs:
           echo "TF_VAR_openbao_jwt=$JWT" >> "$GITHUB_ENV"
       - run: tofu init
       - run: tofu apply -auto-approve
+
+  gcp-plan:
+    if: github.event_name == 'pull_request' && needs.changes.outputs.terraform == 'true'
+    needs: [fmt, changes]
+    runs-on: ubuntu-latest
+    # See glesys-plan for the state credential. The Google sign-in is weaker than production's: a job in
+    # this environment can only become the plan account, which is read-only (docs/gcp.md, "How CI signs
+    # in").
+    environment: plan
+    permissions:
+      contents: read
+      id-token: write # the GitHub OIDC token CI signs in to Google Cloud with
+    defaults:
+      run:
+        working-directory: terraform/gcp
+    env:
+      # Backend: the tfstate instance's CI credential.
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      TF_VAR_state_passphrase: ${{ secrets.TF_VAR_state_passphrase }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_PLAN_ACCOUNT }}@${{ env.GCP_PROVISIONER_PROJECT }}.iam.gserviceaccount.com
+      - run: tofu init
+      - run: tofu validate
+      - name: tofu plan
+        env:
+          TF_VAR_provisioner_project: ${{ env.GCP_PROVISIONER_PROJECT }}
+          TF_VAR_plan_account: ${{ env.GCP_PLAN_ACCOUNT }}
+          TF_VAR_apply_account: ${{ env.GCP_APPLY_ACCOUNT }}
+        run: |
+          tofu plan -lock=false -no-color | tee plan.txt
+          {
+            echo '### terraform/gcp plan'
+            echo '```'
+            cat plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  gcp-apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: fmt
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # the GitHub OIDC token CI signs in to Google Cloud with
+    defaults:
+      run:
+        working-directory: terraform/gcp
+    env:
+      # Backend: the tfstate instance's CI credential.
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      TF_VAR_state_passphrase: ${{ secrets.TF_VAR_state_passphrase }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_APPLY_ACCOUNT }}@${{ env.GCP_PROVISIONER_PROJECT }}.iam.gserviceaccount.com
+      - run: tofu init
+      - run: tofu apply -auto-approve
+        env:
+          TF_VAR_provisioner_project: ${{ env.GCP_PROVISIONER_PROJECT }}
+          TF_VAR_plan_account: ${{ env.GCP_PLAN_ACCOUNT }}
+          TF_VAR_apply_account: ${{ env.GCP_APPLY_ACCOUNT }}

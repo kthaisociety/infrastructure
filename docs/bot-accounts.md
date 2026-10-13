@@ -92,6 +92,19 @@ environments, delete the old key, update 1Password.
 | `deployments-ci` (`jwt` auth) | `deployments`' `production` and `plan` environments, immutable subject | mint tokens through `dokploy-provider` only (`deployments` policy) |
 | `infra-admin` (`oidc`, Google) | the listed kthais.com accounts | read and write app secrets; never `infrastructure/*` |
 
+## Google Cloud service accounts
+
+Made by hand, in the provisioner project ([gcp.md](gcp.md), "The provisioner project"). Their names are
+set at the top of `.github/workflows/tofu.yml` (`GCP_PLAN_ACCOUNT`, `GCP_APPLY_ACCOUNT`) and aren't
+repeated here.
+
+| Account | Bound to | May |
+|---|---|---|
+| the plan account | `infrastructure`'s `plan` environment, immutable subject | read the projects in `terraform/gcp` |
+| the apply account | `infrastructure`'s `production` environment, immutable subject | create projects in the organization; everything in the ones it created (owner) |
+
+Neither has a key: a job signs in with its GitHub OIDC token, so there is nothing to rotate or leak.
+
 ## State
 
 | | `infrastructure` | `deployments` |

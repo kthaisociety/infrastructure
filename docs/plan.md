@@ -828,6 +828,9 @@ admins.
 
 ## Later: GCP as code
 
+_Picked up 2026-10-11: [gcp.md](gcp.md) has the current design. The notes below are the plan as it
+stood before, kept for the reasoning. Where they differ, gcp.md is right._
+
 `terraform/gcp/` will define GCP projects, OAuth clients and similar. It's not part of the foundation
 above, and nothing above depends on it. When we pick it up:
 
