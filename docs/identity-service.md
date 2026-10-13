@@ -26,19 +26,22 @@ Deploying it also needs what the pipeline doesn't support yet:
 
 ## Google OAuth clients today
 
-From the 2026-09-26 GCP audit (`~/kthais/gcp-project-audit-2026-09-26.md`):
+Every client in use and the project that holds it is listed in
+[gcp.md](gcp.md#projects-being-retired). The two that matter here:
 
 | Client | GCP project | Owner |
 |---|---|---|
 | kthais.com sign-in | `clean-healer-452020-n9` ("website") | vilhelm only |
 | Mattermost (chat.aisociety.se) | `mattermost-423409` | vilhelm only |
 
-The identity service gets a **new** Google OAuth client in a **new GCP project defined in
-`terraform/gcp`** (`kthais-identity`, see [gcp.md](gcp.md)), owned by a Google group rather than one
-person. As far as we know, Google has no API
-for creating standard OAuth client IDs, so the project, its APIs and IAM are in code, and the client
-itself is created by hand once in that project. Its authorized redirect URIs are only the identity
+The identity service gets a **new** Google OAuth client in its own GCP project, `kthais-identity`, which
+`terraform/gcp` created on 2026-10-13 ([gcp.md](gcp.md)). The project, its APIs and its owners are in
+code. The client isn't made yet: as far as we know, Google has no API for creating standard OAuth client
+IDs, so it's created by hand once in that project. Its authorized redirect URIs are only the identity
 service's own callbacks, one per environment.
+
+The project is meant to be owned by a Google group rather than by people. Until that group exists, its
+owners are sam and vilhelm.
 
 Apps register with the identity service instead of Google. Their allowed redirect URIs are an exact-match
 allowlist in the identity service's config, set through env in `deployments`
