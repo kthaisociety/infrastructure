@@ -26,10 +26,14 @@ variable "openbao_oidc_client_secret" {
 variable "openbao_admin_emails" {
   description = "kthais.com accounts that can sign in to OpenBao as infra-admin."
   type        = list(string)
+  # Every Platform engineer.
   default = [
     "sam@kthais.com",
     "vilhelm@kthais.com",
     "pavlos.spanoudakis@kthais.com",
     "max.astrand@kthais.com",
+    "isak.fogelberg@kthais.com",
+    "daniel.ibrahimi@kthais.com",
+    "andrea.loiacono@kthais.com",
   ]
 }
