@@ -10,7 +10,6 @@ locals {
       for env in try(cfg.environments, ["staging", "production"]) : "${p}/${env}" => {
         project     = p
         environment = env
-        shared      = try(cfg.shared, []) # legacy, see projects.yaml
       }
     }
   ]...)
@@ -20,11 +19,8 @@ locals {
   # replaces the whole secret, so writing there would wipe what people filled in.
   database_paths = [for pe in values(local.project_environments) : "${pe.project}/${pe.environment}/database"]
 
-  # secret/shared/<environment> once per environment any project has, plus the legacy per-name paths.
-  shared_paths = toset(concat(
-    [for pe in values(local.project_environments) : "shared/${pe.environment}"],
-    flatten([for pe in values(local.project_environments) : [for s in pe.shared : "shared/${s}/${pe.environment}"]]),
-  ))
+  # secret/shared/<environment> once per environment any project has.
+  shared_paths = toset([for pe in values(local.project_environments) : "shared/${pe.environment}"])
 }
 
 module "project_secrets" {
@@ -33,7 +29,6 @@ module "project_secrets" {
 
   project     = each.value.project
   environment = each.value.environment
-  shared      = each.value.shared
   mount       = vault_mount.secret.path
   token_role  = vault_token_auth_backend_role.dokploy_provider.role_name
 }

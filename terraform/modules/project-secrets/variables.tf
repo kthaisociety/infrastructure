@@ -31,12 +31,6 @@ variable "read_shared" {
   default     = true
 }
 
-variable "shared" {
-  description = "Legacy: names of per-name shared secrets this project reads, at secret/shared/<name>/<environment>. Goes away once onboarding-service reads secret/shared/<environment>."
-  type        = list(string)
-  default     = []
-}
-
 variable "mount" {
   description = "The KV v2 mount. Passed from vault_mount.secret so the mount exists first."
   type        = string
