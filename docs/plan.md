@@ -521,8 +521,8 @@ OpenBao's OIDC auth method trusts Google directly.
   `http://localhost:8250/oidc/callback`. Client ID and secret are in 1Password and in the `production`
   environment as `OPENBAO_OIDC_CLIENT_ID` and `OPENBAO_OIDC_CLIENT_SECRET`.
 - **Role `infra-admin`** on the `oidc` mount, bound to `hd = kthais.com` (Workspace accounts, whose emails Google
-  has verified) and an exact email allowlist (`openbao_admin_emails` in `terraform/openbao`): sam@, vilhelm@,
-  pavlos.spanoudakis@ and max.astrand@kthais.com. Tokens last an hour and carry the `infra-admin`
+  has verified) and an exact email allowlist (`openbao_admin_emails` in `terraform/openbao`): every Platform
+  engineer. Tokens last an hour and carry the `infra-admin`
   policy. Adding or removing a person is a PR here.
 - **What `infra-admin` can do:** read and write every project's KV paths except `infrastructure/`, and
   manage `userpass` users. Nothing under `sys/`: mounts, policies, auth methods and tokens change only
