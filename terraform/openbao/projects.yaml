@@ -15,3 +15,5 @@
 # Every project reads the shared store of its environment, secret/shared/<env>; nothing to add here for it.
 
 onboarding-service: {}
+
+lucid: {}
