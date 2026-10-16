@@ -14,8 +14,4 @@
 #
 # Every project reads the shared store of its environment, secret/shared/<env>; nothing to add here for it.
 
-onboarding-service:
-  # Legacy: reads ONBOARDING_SERVICE_SECRET at secret/shared/onboarding-service-secret/<env> until its
-  # deployments project.yaml moves to secret/shared/<env>. Then this key, and `shared` in
-  # modules/project-secrets, go.
-  shared: [onboarding-service-secret]
+onboarding-service: {}

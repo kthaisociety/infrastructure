@@ -50,13 +50,6 @@ resource "vault_policy" "this" {
       }
     EOT
     ] : [],
-    # Legacy per-name shared paths, until onboarding-service reads secret/shared/<environment>.
-    [for s in var.shared : <<-EOT
-      path "${var.mount}/data/shared/${s}/${var.environment}" {
-        capabilities = ["read"]
-      }
-    EOT
-    ],
   ))
 }
 
