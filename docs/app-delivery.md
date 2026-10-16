@@ -230,19 +230,28 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
   shared `${{vault.<project>-<env>.shared/<env>:KEY}}`.
 
 ### 6.2 `project.yaml` (in `deployments`)
+The reference is `deployments`' [project.yaml guide](https://github.com/kthaisociety/deployments/blob/main/docs/project-yaml.md),
+with a [template](https://github.com/kthaisociety/deployments/blob/main/docs/project.template.yaml) to
+start from. Its `check` rejects anything the guide doesn't allow. The shape:
+
 ```yaml
 repo: kthaisociety/my-app            # GitHub repo; the image is ghcr.io/<repo> unless `image:` says otherwise
-defaults:                            # every environment, unless it overrides
-  env:     { KEY: value }            # not secret, written as-is
-  secrets: [SECRET_NAME]             # names only; values in OpenBao
-  shared:  [KEY]                     # names only; values in OpenBao at secret/shared/<env>
-  volumes: { /data: data }           # mount path: volume name (becomes <project>-<env>-data)
+defaults:                            # the same in every environment
+  env:       { KEY: "value" }        # not secret, written as-is; an environment can change a value
+  secrets:   [SECRET_NAME]           # names only; values in OpenBao at secret/<project>/<env>
+  shared:    [KEY]                   # names only; values in OpenBao at secret/shared/<env>
+  databases: { postgres: {} }        # each environment gets its own (2.6); list its names in secrets
+  volumes:   { /data: data }         # optional, avoid: keep apps stateless
 environments:
-  staging: {}                        # same keys as defaults, to override
-  production: {}
+  staging:                           # takes only env and domains; {} when nothing differs
+    domains:
+      my-app-staging.kthais.com: { port: 8000 }
+  production:
+    domains:
+      my-app.kthais.com: { port: 8000 }
 ```
-What the template does **not** do yet, added when the first app needs it: domains (2.5), Postgres and
-Redis (optional blocks, for landingpage-backend), build arguments.
+
+Not supported yet: build arguments, object storage (IT-39).
 
 ### 6.3 `release.yaml` (in `deployments`)
 ```yaml
