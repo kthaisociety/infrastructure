@@ -308,11 +308,11 @@ If denied: org → Packages → `<repo>` → Package settings → Change visibil
 In `terraform/openbao/projects.yaml`, PR, merge (it applies):
 ```yaml
 my-app: {}                                  # staging and production
-my-app: { shared: [onboarding-service-secret] }   # if it reads a shared secret
 ```
 That creates, per environment, the policy `dokploy-project-my-app-<env>` and the empty path
-`secret/my-app/<env>`. Policies live here, not in `deployments`, because their contents decide what a
-token can read. Needed again only for a new environment or a new shared secret.
+`secret/my-app/<env>`, and the policy also reads the shared store `secret/shared/<env>`. Policies live
+here, not in `deployments`, because their contents decide what a token can read. Needed again only for a
+new environment.
 
 ### 4.2 The secrets
 From a laptop (`brew install openbao`), or the UI at `https://bao.kthais.com/ui` (Google sign-in):
@@ -330,7 +330,7 @@ pbcopy < /dev/null
 - `put` for the first key on an empty path, `patch` for every key after it (a second `put` replaces
   the whole secret).
 - `printf '%s' "$(pbpaste)"` drops a trailing newline and keeps internal ones (PEM keys stay intact).
-- Shared secrets go to `secret/shared/<name>/<env>`, once, not per app.
+- Shared secrets go to `secret/shared/<env>`, once, not per app. Every project can read them.
 - Then staging's, at `my-app/staging` (section 2): never production's values.
 - Check by length, not value:
   ```sh
@@ -353,8 +353,8 @@ defaults:                        # every environment, unless it overrides
     SOME_URL: https://example.org
   secrets:                       # names only; values in OpenBao at secret/my-app/<env>
     - API_TOKEN
-  shared:                        # shared secrets: name → keys, at secret/shared/<name>/<env>
-    onboarding-service-secret: [ONBOARDING_SERVICE_SECRET]
+  shared:                        # names only; values in OpenBao at secret/shared/<env>
+    - ONBOARDING_SERVICE_SECRET
   volumes:                       # mount path → volume name (becomes my-app-<env>-<name>)
     /data: data
 environments:

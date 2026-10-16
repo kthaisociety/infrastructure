@@ -27,7 +27,7 @@ deploy is a one-line PR to the project's `release.yaml` in `deployments` (sectio
 | GHCR | `ghcr.io/kthaisociety/<repo>` | the images, public: Dokploy pulls with no credentials. Writable only by its own repo. Check visibility once per new package (2.1) | built |
 | `kthaisociety/deployments` | public | per project `project.yaml` (config, secret names) and `release.yaml` (exact image per environment); OpenTofu that builds the Dokploy side | built (deployments#1); `deploy.yml` not yet |
 | `kthaisociety/infrastructure` | public | the platform, and each project's OpenBao side: one line in `terraform/openbao/projects.yaml` | built |
-| OpenBao | `bao.kthais.com` | secret values at `secret/<project>/<env>` and `secret/shared/<name>/<env>` | built |
+| OpenBao | `bao.kthais.com` | secret values at `secret/<project>/<env>` and `secret/shared/<env>` | built |
 | Dokploy | `synapse.aisociety.se` | runs the images. Never builds, never decides what runs | built |
 | Bots | [bot-accounts.md](bot-accounts.md) | `kthais-release`, `kthais-dispatch`, `kthais-deploy` (GitHub Apps), `Deployments CI` (Dokploy user) | created |
 
@@ -86,19 +86,21 @@ In order. Each step says what "done" looks like.
 
 ### 2.2 Its OpenBao side, in `infrastructure`
 - One line in `terraform/openbao/projects.yaml`: `my-app: {}` (staging and production), or
-  `my-app: { shared: [name] }` if it reads shared secrets, or `environments: [...]` for others.
+  `my-app: { environments: [...] }` for others.
 - PR, plan, merge. Creates per environment the policy `dokploy-project-<project>-<env>` and the empty path
-  `secret/<project>/<env>`. It also lets `deployments`' CI write `secret/<project>/<env>/database/*`, where
-  it puts the credentials of the databases it creates (IT-17, not built in `deployments` yet).
+  `secret/<project>/<env>`. The policy also reads the environment's shared store, `secret/shared/<env>`.
+  It also lets `deployments`' CI write `secret/<project>/<env>/database/*`, where it puts the credentials
+  of the databases it creates (IT-17, not built in `deployments` yet).
 - Why here: a policy's contents decide what a token can read, and `deployments`' CI can mint tokens;
   only this repo writes policies. `deployments`' `check` fails with exactly this line until it exists.
-- Needed again only for a new environment or a new shared secret. Not for new secrets, config or deploys.
+- Needed again only for a new environment. Not for new secrets, shared secrets, config or deploys.
 
 ### 2.3 Its secrets, in OpenBao
 From a laptop (`brew install openbao`, `BAO_ADDR=https://bao.kthais.com`, `bao login -method=oidc
 role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 - Every name in `project.yaml`'s `secrets`, at `secret/<project>/staging` and `secret/<project>/production`;
-  shared ones at `secret/shared/<name>/<env>`.
+  shared ones at `secret/shared/<env>`, once for every project. Every project can read the shared store
+  of its environment, so put only values there that any app may see.
 - `put` for the first key on an empty path, `patch` after (a second `put` replaces the whole secret).
 - Not under `secret/<project>/<env>/database/`: `deployments`' CI writes those, and people can only read them.
 - Values through stdin, never as arguments; long values from the clipboard (a terminal paste is cut at
@@ -206,14 +208,14 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 - Projects: lowercase letters, digits, single hyphens; not `infrastructure` or `shared`. Environments:
   lowercase letters and digits only (names join as `<project>-<env>`, split at the last hyphen).
 - OpenBao: policy `dokploy-project-<project>-<env>`, path `secret/<project>/<env>`, shared
-  `secret/shared/<name>/<env>`, database credentials `secret/<project>/<env>/database/<engine>` (written by
+  `secret/shared/<env>`, database credentials `secret/<project>/<env>/database/<engine>` (written by
   `deployments`' CI).
 - Dokploy: project `<project>`, vault provider `<project>-<env>`, app internal name
   `<project>-<env>-<6 random>` (Dokploy picks the suffix; the apply output `projects` shows it), volume
   `<project>-<env>-<name>`.
 - Images: `sha-<7>` (every build of `main`), `X.Y.Z` (releases, never moved); always pinned by digest.
 - Secret references (generated, never hand-written): `${{vault.<project>-<env>.<project>/<env>:KEY}}`,
-  shared `${{vault.<project>-<env>.shared/<name>/<env>:KEY}}`.
+  shared `${{vault.<project>-<env>.shared/<env>:KEY}}`.
 
 ### 6.2 `project.yaml` (in `deployments`)
 ```yaml
@@ -221,7 +223,7 @@ repo: kthaisociety/my-app            # GitHub repo; the image is ghcr.io/<repo> 
 defaults:                            # every environment, unless it overrides
   env:     { KEY: value }            # not secret, written as-is
   secrets: [SECRET_NAME]             # names only; values in OpenBao
-  shared:  { shared-name: [KEY] }    # shared secrets, by name and key
+  shared:  [KEY]                     # names only; values in OpenBao at secret/shared/<env>
   volumes: { /data: data }           # mount path: volume name (becomes <project>-<env>-data)
 environments:
   staging: {}                        # same keys as defaults, to override

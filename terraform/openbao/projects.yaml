@@ -9,10 +9,13 @@
 # read, and deployments' CI may mint tokens with them.
 #
 # Adding a project is one line:   my-app: {}
-# Defaults: environments [staging, production], no shared secrets. Optional keys:
+# Defaults: environments [staging, production]. Optional key:
 #   environments: [...]   # environment names: lowercase letters and digits only
-#   shared: [...]         # shared secrets it reads, at secret/shared/<name>/<env>, in every environment
+#
+# Every project reads the shared store of its environment, secret/shared/<env>; nothing to add here for it.
 
 onboarding-service:
-  # ONBOARDING_SERVICE_SECRET, also read by landingpage-backend.
+  # Legacy: reads ONBOARDING_SERVICE_SECRET at secret/shared/onboarding-service-secret/<env> until its
+  # deployments project.yaml moves to secret/shared/<env>. Then this key, and `shared` in
+  # modules/project-secrets, go.
   shared: [onboarding-service-secret]

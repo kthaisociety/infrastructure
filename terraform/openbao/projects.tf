@@ -1,5 +1,6 @@
 # Every project in projects.yaml gets, per environment, a policy, a Dokploy provider token and an empty
-# secret path (modules/project-secrets).
+# secret path (modules/project-secrets). Every policy also reads the environment's shared store,
+# secret/shared/<environment>, so reading a shared value needs no change here.
 
 locals {
   projects = yamldecode(file("${path.module}/projects.yaml"))
@@ -9,7 +10,7 @@ locals {
       for env in try(cfg.environments, ["staging", "production"]) : "${p}/${env}" => {
         project     = p
         environment = env
-        shared      = try(cfg.shared, [])
+        shared      = try(cfg.shared, []) # legacy, see projects.yaml
       }
     }
   ]...)
@@ -19,10 +20,11 @@ locals {
   # replaces the whole secret, so writing there would wipe what people filled in.
   database_paths = [for pe in values(local.project_environments) : "${pe.project}/${pe.environment}/database"]
 
-  # Each shared secret path once, however many projects read it.
-  shared_paths = toset(flatten([
-    for pe in values(local.project_environments) : [for s in pe.shared : "shared/${s}/${pe.environment}"]
-  ]))
+  # secret/shared/<environment> once per environment any project has, plus the legacy per-name paths.
+  shared_paths = toset(concat(
+    [for pe in values(local.project_environments) : "shared/${pe.environment}"],
+    flatten([for pe in values(local.project_environments) : [for s in pe.shared : "shared/${s}/${pe.environment}"]]),
+  ))
 }
 
 module "project_secrets" {
