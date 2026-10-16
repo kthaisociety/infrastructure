@@ -1,5 +1,6 @@
 # One project environment's side of OpenBao: the policy its Dokploy vault provider uses, that provider's
-# token, and the (empty) path an admin fills in the UI. Used by terraform/openbao/projects.tf.
+# token, and the (empty) path an admin fills in the UI. The policy also reads the environment's shared
+# store, secret/shared/<environment>. Used by terraform/openbao/projects.tf.
 
 terraform {
   required_providers {
@@ -39,6 +40,17 @@ resource "vault_policy" "this" {
       }
     EOT
     ],
+    # The shared store: one path per environment, readable by every project in that environment.
+    var.read_shared ? [<<-EOT
+      path "${var.mount}/data/shared/${var.environment}" {
+        capabilities = ["read"]
+      }
+      path "${var.mount}/metadata/shared/${var.environment}" {
+        capabilities = ["read", "list"]
+      }
+    EOT
+    ] : [],
+    # Legacy per-name shared paths, until onboarding-service reads secret/shared/<environment>.
     [for s in var.shared : <<-EOT
       path "${var.mount}/data/shared/${s}/${var.environment}" {
         capabilities = ["read"]

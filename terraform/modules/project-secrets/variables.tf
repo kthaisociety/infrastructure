@@ -25,8 +25,14 @@ variable "environment" {
   }
 }
 
+variable "read_shared" {
+  description = "Read the environment's shared store, secret/shared/<environment>. False for the infrastructure project, which needs none of it."
+  type        = bool
+  default     = true
+}
+
 variable "shared" {
-  description = "Names of shared secrets this project reads, at secret/shared/<name>/<environment>."
+  description = "Legacy: names of per-name shared secrets this project reads, at secret/shared/<name>/<environment>. Goes away once onboarding-service reads secret/shared/<environment>."
   type        = list(string)
   default     = []
 }

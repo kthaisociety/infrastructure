@@ -294,8 +294,10 @@ the isolation boundary:
   `verify_connection` fails with a bare `token validation failed (status 403)` although reads would work.
   We grant `lookup-self` alone rather than all of `default`.
 - **Shared secrets** (e.g. `ONBOARDING_SERVICE_SECRET`, which both `landingpage-backend` and
-  onboarding-service need) live at `shared/<name>/<environment>`, and only the policies of the projects
-  that need them can read it.
+  onboarding-service need) live in one shared store per environment, `shared/<environment>`, and every
+  project's policy reads the store of its own environment. Only values any app may see go there; anything
+  narrower is a project secret. (Changed 2026-10-16 from per-name paths granted per project, which needed
+  a PR here for every new reader.)
 - **Who writes secrets:** infra admins, in the UI (see
   [People log in with Google](#people-log-in-with-google-userpass-is-break-glass)). Later, each project's owners
   write their own `secret/data/<project>/*`. OpenTofu never writes app secrets; the one exception is

@@ -61,7 +61,7 @@ resource "vault_auth_backend" "userpass" {
   path = "userpass"
 }
 
-# App secrets: secret/<project>/<environment>, plus secret/shared/<name>/<environment> and
+# App secrets: secret/<project>/<environment>, plus secret/shared/<environment> and
 # secret/infrastructure/production (written only by OpenTofu, snapshots.tf).
 resource "vault_mount" "secret" {
   path    = "secret"

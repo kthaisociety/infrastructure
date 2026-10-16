@@ -50,6 +50,7 @@ module "infrastructure_secrets" {
   token_role    = vault_token_auth_backend_role.dokploy_provider_infrastructure.role_name
   policy_prefix = "dokploy-"
   create_path   = false
+  read_shared   = false
 }
 
 locals {
