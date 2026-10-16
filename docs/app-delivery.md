@@ -1,6 +1,6 @@
 # App delivery: from a push to running on Dokploy
 
-_Updated 2026-10-02. The design and its reasons are in [delivery-plan.md](delivery-plan.md); this is the
+_Updated 2026-10-17. The design and its reasons are in [delivery-plan.md](delivery-plan.md); this is the
 guide to using it. Each part says whether it's **built** or **not yet**: treat anything "not yet" as
 intended, not as fact._
 
@@ -15,8 +15,10 @@ release PR ──merge (code owner)──▶ vX.Y.Z + GitHub Release
                          └─▶ release: wait for that build ──▶ X.Y.Z = same digest ──deploy.yml──▶ production
 ```
 
-**Today (step 12 not built):** the build and release halves run; `deploy.yml` doesn't exist yet, so a
-deploy is a one-line PR to the project's `release.yaml` in `deployments` (section 3.1).
+**Built.** Each half runs once the app opts in with its job: `deploy-staging` in `build.yml`,
+`deploy-production` in `release.yml` (section 2.1). Both call `request-deploy.yml`, which asks
+`deployments`' `deploy.yml` with the `kthais-dispatch` App and waits for the result. `deploy.yml` checks
+the request, commits the one `release.yaml` line itself (as `kthais-deploy`, no PR) and applies, in one run.
 
 ## 1. The pieces
 
@@ -25,7 +27,7 @@ deploy is a one-line PR to the project's `release.yaml` in `deployments` (sectio
 | App repo | e.g. `kthaisociety/onboarding-service` | code, `CHANGELOG.md`, version (release-please manifest), three workflow files calling `kthaisociety/workflows` | built (onboarding-service) |
 | `kthaisociety/workflows` | public, tags `v0.1.0`… | `semantic-pr.yml`, `build.yml`, `release.yml` (reusable). Must stay public: public repos can't call workflows from a private one | built |
 | GHCR | `ghcr.io/kthaisociety/<repo>` | the images, public: Dokploy pulls with no credentials. Writable only by its own repo. Check visibility once per new package (2.1) | built |
-| `kthaisociety/deployments` | public | per project `project.yaml` (config, secret names) and `release.yaml` (exact image per environment); OpenTofu that builds the Dokploy side | built (deployments#1); `deploy.yml` not yet |
+| `kthaisociety/deployments` | public | per project `project.yaml` (config, secret names) and `release.yaml` (exact image per environment); OpenTofu that builds the Dokploy side | built (deployments#1); `deploy.yml` built (deployments#10) |
 | `kthaisociety/infrastructure` | public | the platform, and each project's OpenBao side: one line in `terraform/openbao/projects.yaml` | built |
 | OpenBao | `bao.kthais.com` | secret values at `secret/<project>/<env>` and `secret/shared/<env>` | built |
 | Dokploy | `synapse.aisociety.se` | runs the images. Never builds, never decides what runs | built |
@@ -46,10 +48,14 @@ In order. Each step says what "done" looks like.
   must either be the same in both, or be read at runtime instead. Check this before adopting.
 - **A Dockerfile** (or anything `docker build` can build) listening on one port.
 - **`.github/workflows/`**, copied from onboarding-service:
-  - `pr.yml`: `title` (calls `semantic-pr.yml@v0.1.0`) and the app's own tests;
-  - `build.yml`: on `main`, tests then `build.yml@v0.1.0` (pushes `sha-<7>`);
+  - `pr.yml`: `title` (calls `semantic-pr.yml@v0.2.0`) and the app's own tests;
+  - `build.yml`: on `main`, tests, then `build.yml@v0.2.0` (pushes `sha-<7>`), then `deploy-staging`
+    (`request-deploy.yml@v0.2.0`, `environment: staging`, with the `DISPATCH_APP_*` secrets);
   - `release.yml`: on `main`, its own file (it waits for `build.yml`'s run of the release commit, which
-    never finishes if both are in one run), calls `release.yml@v0.1.0` with the `RELEASE_APP_*` secrets.
+    never finishes if both are in one run), calls `release.yml@v0.2.0` with the `RELEASE_APP_*` secrets,
+    then `deploy-production` (`request-deploy.yml@v0.2.0`, `environment: production`, the released
+    version, only when a release was created).
+  - The project in `deployments` defaults to the repo's name, so name the repo after the project.
 - **release-please config** at the root: `release-please-config.json` (`release-type`: `go`, `node`,
   `python`, …, or `simple`; `bootstrap-sha`: the commit before adoption, so the first changelog starts
   there) and `.release-please-manifest.json` (`{".": "0.0.0"}`).
@@ -90,7 +96,7 @@ In order. Each step says what "done" looks like.
 - PR, plan, merge. Creates per environment the policy `dokploy-project-<project>-<env>` and the empty path
   `secret/<project>/<env>`. The policy also reads the environment's shared store, `secret/shared/<env>`.
   It also lets `deployments`' CI write `secret/<project>/<env>/database/*`, where it puts the credentials
-  of the databases it creates (IT-17, not built in `deployments` yet).
+  of the databases it creates (section 2.6).
 - Why here: a policy's contents decide what a token can read, and `deployments`' CI can mint tokens;
   only this repo writes policies. `deployments`' `check` fails with exactly this line until it exists.
 - Needed again only for a new environment. Not for new secrets, shared secrets, config or deploys.
@@ -128,44 +134,50 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
   exists before its first deploy so its volumes are attached by then: a mount can only be added to an app
   that exists.
 
-### 2.5 Domains (if public) **[not yet]**
-- `modules/project` doesn't create domains yet. Planned: `domains: [...]` per environment and `port:`
-  in `project.yaml`, from which it makes the Dokploy domain (Traefik route and Let's Encrypt certificate).
-- **DNS stays a manual `dnscontrol` PR** per host, pointing at the Dokploy host. Without the record Let's
-  Encrypt can't validate; without the route Traefik answers 404 on its default certificate. Later,
-  `deployments` may open that `dnscontrol` PR itself when a new domain appears.
+### 2.5 Domains (if public)
+- `domains:` per environment in `project.yaml`, each host with its container `port` (deployments#14).
+  `modules/project` makes the Dokploy domain: Traefik route and Let's Encrypt certificate.
+- **DNS stays a manual `dnscontrol` PR** per host, pointing at the Dokploy host, merged first. Without the
+  record Let's Encrypt can't validate; without the route Traefik answers 404 on its default certificate.
+  New projects use `<name>` and `<name>-staging` on kthais.com.
 
-### 2.6 First deploy, to staging
-- PR to `deployments` setting `release.yaml`'s `staging:` to `ghcr.io/kthaisociety/<repo>:sha-<7>@sha256:<digest>`
-  (digest from the `build` run's summary, or the registry). Merge: the app switches from the placeholder
-  to the image and deploys by itself, volumes already attached (confirmed on onboarding-service's first
-  staging deploy, 2026-10-02: no Deploy click needed).
+### 2.6 Databases **[deployments#19, in review]**
+- `databases:` under `defaults` in `project.yaml` (`postgres: {}`, `redis: {}`): each environment gets its
+  own. The pipeline generates the credentials and writes them to `secret/<project>/<env>/database/<engine>`.
+- The app gets a setting only by listing its name in `secrets` (`DATABASE_URL`, `PGHOST`, `REDIS_URL`, …).
+  The list per engine is in `deployments`' `docs/project-yaml.md`. Nobody writes these values by hand.
+
+### 2.7 First deploy, to staging
+- The next build of `main` deploys it (or re-run the last `build` run). `deploy.yml` writes `release.yaml`'s
+  `staging:` line, and the app switches from the placeholder to the image, volumes already attached.
+  By hand instead: Actions → deploy → Run workflow in `deployments`.
 - **Done when:** the deploy succeeds (every `${{vault…}}` reference resolved; a missing key fails the
   deploy), the app logs look right, and it answers on `http://<app name>:<port>` from `dokploy-network`.
 
-### 2.7 First release, to production
+### 2.8 First release, to production
 - release-please only opens a release PR after a `feat:` or `fix:`, or a commit with a `Release-As:`
   footer. For a chosen first version, squash-merge any PR with this in the commit message:
   ```
   Release-As: 1.0.0
   ```
-- A code owner merges the release PR: tag `v1.0.0`, GitHub Release, and the release commit's image
-  tagged `1.0.0` (same digest, no rebuild).
-- PR to `deployments` setting `production:` to `…:1.0.0@sha256:<digest>`. Merge.
+- A code owner merges the release PR: tag `v1.0.0`, GitHub Release, the release commit's image tagged
+  `1.0.0` (same digest, no rebuild), and `deploy-production` deploys it.
 
 ## 3. Day to day
 
 ### 3.1 A change, to staging
-- **Today:** PR in the app repo (title, tests, Greptile) → squash merge → `build` pushes `sha-<7>` → a PR
-  to `deployments` updating `staging:` → merge → apply → staging redeploys.
-- **After step 12:** the same, with `build` asking `deploy.yml`, which checks the request, opens and
-  merges the `release.yaml` PR itself (`kthais-deploy`, `bot-scope`), waits for the apply, and reports back.
+- PR in the app repo (title, tests, Greptile) → squash merge → `build` pushes `sha-<7>` → `deploy-staging`
+  asks `deploy.yml`, which checks the digest, commits the `staging:` line, applies, and reports back. The
+  build is green only once staging runs the image.
 
 ### 3.2 A release, to production
 - Review the release PR (version, `CHANGELOG.md`), a code owner merges it → tag, GitHub Release →
   `release` waits for the release commit's build → tags `X.Y.Z` on that digest.
-- **Today:** PR to `deployments` updating `production:`. **After step 12:** automatic, with
-  `deploy.yml` also checking that the Release exists and the digest is the release commit's.
+- Then `deploy-production` asks `deploy.yml`, which also checks that the GitHub Release exists and the
+  digest is the release commit's, and deploys production.
+- **Keeping a change out of production:** revert it on `main` before merging the release PR, or ship it
+  behind an `env` flag that's off in production. Production only moves when a release PR merges.
+- **Rollback:** run `deploy.yml` by hand with the previous version.
 
 ### 3.3 Config and secrets
 - Non-secret env, volumes, new secret names: a PR to `project.yaml`. Merging redeploys.
@@ -245,7 +257,7 @@ production: null                     # null: not deployed yet (the app exists, w
 | app | `build.yml` | push to `main` | `contents: read`, `packages: write` |
 | app | `release.yml` | push to `main` | `contents: read`, `packages: write`, `actions: read`; `kthais-release` token |
 | `deployments` | `tofu.yml` | PRs (`check`; `plan` after approval), `main`, weekly, by hand (`apply`) | `id-token: write` for OpenBao; `plan`/`production` environment secrets |
-| `deployments` | `deploy.yml` | dispatch from app repos | **not yet** (step 12) |
+| `deployments` | `deploy.yml` | dispatch from app repos (`kthais-dispatch`), or by hand | `contents: read`, `id-token: write` for OpenBao; `production` environment secrets; `kthais-deploy` token to commit `release.yaml` |
 | `infrastructure` | `tofu.yml` | PRs, `main`, weekly | as above |
 
 OpenTofu 1.12.6 in both repos (1.13.1 is out; upgrade both together).
