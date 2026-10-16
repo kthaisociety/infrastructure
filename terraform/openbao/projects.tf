@@ -14,6 +14,11 @@ locals {
     }
   ]...)
 
+  # Where deployments' CI writes the credentials of the databases it creates, one secret per engine under
+  # each: secret/<project>/<env>/database/<engine>. Its own path, not secret/<project>/<env>: a KV v2 write
+  # replaces the whole secret, so writing there would wipe what people filled in.
+  database_paths = [for pe in values(local.project_environments) : "${pe.project}/${pe.environment}/database"]
+
   # Each shared secret path once, however many projects read it.
   shared_paths = toset(flatten([
     for pe in values(local.project_environments) : [for s in pe.shared : "shared/${s}/${pe.environment}"]
