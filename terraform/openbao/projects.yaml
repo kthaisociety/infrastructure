@@ -14,3 +14,9 @@
 onboarding-service:
   # ONBOARDING_SERVICE_SECRET, also read by landingpage-backend.
   shared: [onboarding-service-secret]
+
+landingpage-backend:
+  # Shares ONBOARDING_SERVICE_SECRET with onboarding-service.
+  shared: [onboarding-service-secret]
+
+landingpage-frontend: {}
