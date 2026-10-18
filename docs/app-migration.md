@@ -1,6 +1,6 @@
 # Migrating an app from the Dokploy UI to the delivery pipeline
 
-_2026-10-03. Generalized from onboarding-service's migration
+_2026-10-03, updated 2026-10-18 for domains, databases and staging-only apps. Generalized from onboarding-service's migration
 ([onboarding-service-migration.md](onboarding-service-migration.md)), the first app moved. How the
 pipeline works once an app is on it: [app-delivery.md](app-delivery.md). Why it's built this way:
 [delivery-plan.md](delivery-plan.md). Every bot and credential: [bot-accounts.md](bot-accounts.md)._
@@ -24,8 +24,10 @@ switchover, and rolling back is pointing back at it.
 |---|---|
 | App from an image, env, secrets, volumes, staging + production | **built** (onboarding-service) |
 | Internal-only app (called by other apps on `dokploy-network`) | **built** |
-| Public domain (Traefik route + certificate) | **not yet** in `modules/project` (section 5.3) |
-| Postgres, Redis | **not yet** in `modules/project` (section 5.4) |
+| Staging only (no production yet) | **built**: production stays an idle placeholder (section 2) |
+| Public domain (Traefik route + certificate) | **built** (deployments#14, section 5.3) |
+| Postgres, Redis | **in review** (deployments#19, section 5.4) |
+| Database outside Dokploy (Neon, Supabase, …) | moves to our Postgres; data copied at the switchover (section 7.2) |
 | Database backups | **not yet** (needs a GleSYS backup destination in OpenTofu) |
 | Build-time env (Next.js `NEXT_PUBLIC_*`, Vite `VITE_*`) | **not supported**: one image runs in both environments (section 2) |
 
@@ -90,7 +92,7 @@ EOF
 | Env vars: **secret** | name only (values go to OpenBao) | `MATTERMOST_BOT_TOKEN`, … |
 | Shared secrets | a value another app also has (same name, same value) | `ONBOARDING_SERVICE_SECRET` (with landingpage-backend) |
 | Volumes | mount path, volume name, what's in it | `/data` → `onboarding-service-data` (SQLite) |
-| Databases | Postgres/Redis/… services in the project: names, image (version), database and user (the script prints them) | none |
+| Databases | Postgres/Redis/… services in the project: names, image (version), database and user (the script prints them). Or an external one (Neon, Supabase): its provider and Postgres version, from the connection setting's name | none |
 | Domains | hosts, port, path | none |
 | Who calls it | other apps' env holding its internal name or domain | backend + frontend `ONBOARDING_SERVICE_URL` |
 | What it calls | URLs in its own env (other apps, Mattermost, …) | backend, Mattermost, Google |
@@ -108,6 +110,9 @@ Environment tab, or the script above per project. Those env vars change at the s
 
 ## 2. Decide
 
+- **Production, or staging only.** An app with no real users yet (only a dev version today) moves to
+  **staging only**: `deployments` still creates production, but it stays an idle placeholder until the
+  app's first release. Its switchover (section 7) happens on staging.
 - **Staging's secrets.** Real but separate credentials (a test Google account, a staging API key), or
   **inert** ones when the app can act on real accounts and nothing safe exists (onboarding-service:
   a service-account JSON with no real key, a dummy bot token). Never production's values.
@@ -116,8 +121,10 @@ Environment tab, or the script above per project. Those env vars change at the s
   `NEXT_PUBLIC_*`, Vite `VITE_*`) need those values to be identical in both environments, or read at
   runtime instead (a `/config` endpoint, `window.__ENV__` injected at start, or server-side rendering).
   Fix that in the app first.
-- **Domains.** Production keeps its domain. Staging gets its own (e.g. `staging.<domain>`), or none if
-  it's tested internally.
+- **Domains.** Production keeps its domain, but it moves to the new app only at the switchover (5.3,
+  7.5). Staging gets its own host (`<name>-staging.kthais.com`), or none if it's tested internally. A
+  staging-only app that keeps its old host (e.g. a `-dev` name) moves it the same way as production's;
+  a new `-staging` host avoids that.
 - **Version.** The first release: `1.0.0`, or the version the app already uses.
 - **Switchover window.** When the app is least used; long enough for the data copy.
 
@@ -320,15 +327,25 @@ From a laptop (`brew install openbao`), or the UI at `https://bao.kthais.com/ui`
 export BAO_ADDR=https://bao.kthais.com
 bao login -method=oidc role=infra-admin
 ```
-For each secret name from the inventory, copy the value from the old app's Environment tab **through the
-clipboard** (never typed into a command line, never pasted into chat):
+**Every value is new.** Anything that was in Dokploy counts as exposed: nobody controlled who saw it.
+So never copy a value from the old app. For each secret name from the inventory, issue a new one where
+it comes from (a new API key, bot token or OAuth client secret on the provider's page), and write it
+**through the clipboard** (never typed into a command line, never pasted into chat):
 ```sh
 printf '%s' "$(pbpaste)" | bao kv put   -mount=secret my-app/production FIRST_KEY=-
 printf '%s' "$(pbpaste)" | bao kv patch -mount=secret my-app/production SECOND_KEY=-
 pbcopy < /dev/null
 ```
+A value the app itself defines (a signing key, a random token) is generated straight into OpenBao:
+```sh
+openssl rand -base64 32 | tr -d '\n' | bao kv patch -mount=secret my-app/production SESSION_SECRET=-
+```
 - `put` for the first key on an empty path, `patch` for every key after it (a second `put` replaces
   the whole secret).
+- The old app keeps running on the old values until the switchover. Revoke them at the source in 7.8.
+- A new value for a secret another app also holds (a shared secret, a key it verifies) must reach that
+  app too, at the switchover. Note it in 1.3's list of callers.
+- Database credentials aren't written here: the pipeline creates them (5.4).
 - `printf '%s' "$(pbpaste)"` drops a trailing newline and keeps internal ones (PEM keys stay intact).
 - Shared secrets go to `secret/shared/<env>`, once, not per app. Every project can read them.
 - Then staging's, at `my-app/staging` (section 2): never production's values.
@@ -353,16 +370,23 @@ defaults:                        # every environment, unless it overrides
     SOME_URL: https://example.org
   secrets:                       # names only; values in OpenBao at secret/my-app/<env>
     - API_TOKEN
+    - DATABASE_URL               # written by the pipeline, from databases (5.4)
   shared:                        # names only; values in OpenBao at secret/shared/<env>
     - ONBOARDING_SERVICE_SECRET
+  databases:                     # each environment gets its own (5.4)
+    postgres: {}
   volumes:                       # mount path → volume name (becomes my-app-<env>-<name>)
     /data: data
 environments:
-  staging:
+  staging:                       # takes only env and domains
     env:
       SOME_URL: https://staging.example.org   # overrides
-  production: {}
+    domains:                     # 5.3
+      my-app-staging.kthais.com: {port: 8000}
+  production: {}                 # its domain is added at the switchover (7.5)
 ```
+Every key is described in `deployments`' `docs/project-yaml.md`; `docs/project.template.yaml` is a
+starting point.
 
 `projects/my-app/release.yaml`: every environment `null` (check requires it for a new project):
 ```yaml
@@ -376,33 +400,43 @@ production: null
 ### 5.2 Merge
 `check` must pass (it also fails, with the exact line, if `infrastructure`'s `projects.yaml` doesn't list
 the project yet). A reviewer approves the `plan` run; read it: per environment a provider token, a vault
-provider, an app and its mounts, plus the project and `staging`. Merge: it applies. In Dokploy: project
+provider, an app and its mounts, its databases and their credentials in OpenBao, staging's domain, plus
+the project and `staging`. Merge: it applies. In Dokploy: project
 `my-app`, `staging` and `production`, an idle app in each (placeholder image, not deployed), both providers
 under Settings → Secrets.
 
-### 5.3 Domains **[not yet built]**
-Planned: `domains: [host, …]` per environment and `port:` in `project.yaml`, from which `modules/project`
-creates each Dokploy domain (Traefik route and Let's Encrypt certificate). Until then a public app can't
-migrate. With it:
-- **DNS** stays a `dnscontrol` PR per host, pointing at the Dokploy host. Add staging's before its first
-  deploy; production's already exists (it's the old app's).
-- **Production's domain moves at the switchover** (section 7.5): two apps can't serve the same host.
+### 5.3 Domains
+`domains:` under an environment in `project.yaml`, keyed by host, each with the container `port`
+(deployments#14). `modules/project` creates the Dokploy domain: Traefik route and Let's Encrypt
+certificate. `check` rejects a host declared twice in `deployments`.
+- **DNS** is a `dnscontrol` PR per host, pointing at the Dokploy host. Merge staging's before its first
+  deploy, so the certificate can be issued. Production's usually exists already (it's the old app's).
+- **Staging's domain goes in this PR. Production's doesn't.** A merge applies right away, and the old app
+  still serves that host. Two Traefik routers with the same `Host()` rule have equal priority, and
+  which one serves a request isn't something to rely on; it can change on a reload. `check` can't catch
+  it either: the old app isn't in `deployments`. So production's domain is a separate PR, prepared and
+  approved before the switchover and merged during it, right after the domain is removed from the old
+  app (section 7.5). The same applies to a staging-only app that keeps its old host.
+- To try production in a browser before the switchover, give it a temporary host
+  (`my-app-next.kthais.com`: DNS plus a domain under `production`), and remove it after.
 
-### 5.4 Postgres and Redis **[not yet built]**
-Being built in `modules/project` (IT-17), first for an FDE prototype. How a project asks for a database
-in `project.yaml` isn't settled yet; the schema guide will have it.
-- One `dokploy_postgres` (or `dokploy_redis`) per environment, in that environment, on its own volume.
-- **The password is generated by OpenTofu**, so no human writes it, and sent to Dokploy write-only where
-  the resource allows it (`database_password_wo` on Postgres).
-- **The credentials go to OpenBao** at `secret/<project>/<env>/database/<engine>`, written by
-  `deployments`' CI. Its own path, not `secret/<project>/<env>`, which people fill in; people can only read
-  it (`terraform/openbao/deployments.tf`, `main.tf`).
-- **The app gets them as vault references**, like its other secrets, added by the module, so the values
-  never sit in the app's env in Dokploy.
-- **Backups:** `dokploy_backup` to a GleSYS destination, once that destination is in OpenTofu.
-- Until then: an app with a database can't migrate yet; or, as an exception, keep its database on the
-  old project and point the new app at it by internal name (secrets in OpenBao), migrating the database
-  later. Agree that with an infra admin first.
+### 5.4 Postgres and Redis **[deployments#19, in review]**
+Until #19 is merged, an app with a database waits.
+- `databases:` under `defaults` (`postgres: {}`, `redis: {}`): each environment gets its own instance,
+  on its own volume, `postgres:17-alpine` and `redis:7-alpine` unless `image:` says otherwise. Defaults
+  only: the code relies on it, so a staging-only app's production gets one too, idle.
+- **The credentials are generated by OpenTofu**, so no person writes or sees them, and written to OpenBao
+  at `secret/<project>/<env>/database/<engine>` by `deployments`' CI. People can only read that path.
+- **The app gets a setting only when its name is listed in `secrets`**: `PGHOST`, `PGPORT`, `PGUSER`,
+  `PGPASSWORD`, `PGDATABASE`, `DATABASE_URL` for Postgres, `REDIS_HOST`, `REDIS_PORT`,
+  `REDIS_PASSWORD`, `REDIS_URL` for Redis. `check` fails on an engine with none of its names listed.
+- The database and user are the project name with `_` for `-` (`my_app`).
+- **Backups:** not yet (IT-18), needs a GleSYS destination in OpenTofu.
+- If the app's current database has to stay a while longer (agree with an infra admin first): leave
+  `databases` out and migrate the database later. Change its password in 7.1, not now: the old app
+  keeps connecting with the current one until it's stopped, and a rollback restarts it. Then write the
+  connection settings to OpenBao as ordinary production secrets, and put the new password in the old
+  app's Environment too.
 
 ---
 
@@ -435,16 +469,26 @@ GitHub Release, and, once the release commit's build and staging deploy passed, 
 Don't delete release tags: release-please finds the previous release by its tag, and would propose the
 same version again.
 
+A staging-only app skips this until it's ready for production.
+
 ---
 
 ## 7. Data migration and switchover
 
-Before: production's secrets written (4.2), the release built (6.4), the steps below read through, the
+Before: production's secrets written (4.2; a kept database's password waits for 7.1), the release built (6.4), the steps below read through, the
 rollback understood, and a time when the app is least used. Each step: check before the next.
+
+**A staging-only app** does this whole section on **staging**: copy into staging's volumes and database,
+skip 7.3, and skip 7.6. Staging is already running, and has created its files and schema, so before
+the copy: no merges to the app's `main` until it's done (each one redeploys staging), **Stop** the
+staging app in Dokploy, and empty its volume and database (7.2). After the copy, redeploy its current
+`sha-<7>`.
 
 ### 7.1 Freeze the old app
 Dokploy → old project → app: **Auto Deploy off** (otherwise a push to the repo rebuilds and restarts
 it), then **Stop**. From here until 7.5 the app is down. Stop its database too only after its dump (7.2).
+A database kept in the old project (the exception in 5.4): change its password now, then write it to
+OpenBao and the old app's Environment.
 
 ### 7.2 Copy the data
 
@@ -471,24 +515,53 @@ sudo docker run --rm -v "$OLD":/from:ro -v "$NEW":/to alpine sh -c "set -e
 - **The `chown` matters**: the app runs as a non-root user, and SQLite needs to write in the directory
   itself (journal files).
 
-**Postgres** (once 5.4 exists), on the host:
+**Postgres in the old Dokploy project**, on the host:
 ```sh
 OLD_DB=$(sudo docker ps -q --filter name=<old postgres appName>)
-NEW_DB=$(sudo docker ps -q --filter name=<new postgres appName>)
+NEW_DB=$(sudo docker ps -q --filter name=my-app-production-postgres)   # its database and user: my_app
 # a custom-format dump from the old database, while the old app is stopped
 sudo docker exec "$OLD_DB" pg_dump -U <old user> -d <old db> -Fc -f /tmp/app.dump
 sudo docker cp "$OLD_DB":/tmp/app.dump /tmp/app.dump
 sudo docker cp /tmp/app.dump "$NEW_DB":/tmp/app.dump
-sudo docker exec "$NEW_DB" pg_restore -U <new user> -d <new db> --no-owner --no-privileges --exit-on-error /tmp/app.dump
+sudo docker exec "$NEW_DB" pg_restore -U <new user> -d <new db> --no-owner --no-privileges --single-transaction /tmp/app.dump
 # check: row counts of the main tables match on both sides
 sudo docker exec "$OLD_DB" psql -U <old user> -d <old db> -c "select count(*) from <table>"
 sudo docker exec "$NEW_DB" psql -U <new user> -d <new db> -c "select count(*) from <table>"
 sudo rm /tmp/app.dump; sudo docker exec "$OLD_DB" rm /tmp/app.dump; sudo docker exec "$NEW_DB" rm /tmp/app.dump
 ```
-- Restore into an empty database; the new app's migrations should run after, not before, unless the app
-  requires its schema first (then restore data only: `--data-only`).
-- Same or newer Postgres major version on the new side. `pg_dump` from the newer version if they differ.
+- **Restore into an empty database**; the new app's migrations should run after, not before, unless the
+  app requires its schema first (then restore data only: `--data-only`). If the app already ran against
+  it (staging), empty it first **[untested]**:
+  `sudo docker exec "$NEW_DB" psql -U my_app -d my_app -c 'drop schema public cascade; create schema public;'`
+- **`--single-transaction`**: a failed restore rolls back entirely (it implies `--exit-on-error`), so
+  the database is still empty and the same command can run again once the cause is fixed.
+- Same or newer Postgres major version on the new side (ours is 17). `pg_dump` from the newer version
+  if they differ.
 - The dump contains everything in the database: delete it from the host when done.
+
+**An external Postgres (Neon, Supabase, …)**, on the host. **[untested]** The dump runs in a throwaway
+`postgres:17-alpine` container, so its `pg_dump` matches our version; the source must be 17 or older.
+Use the provider's **direct** connection string, not a pooled one (on Neon, the host without `-pooler`):
+`pg_dump` needs a session the pooler doesn't give it.
+```sh
+read -rs SRC_URL      # paste the connection string; it isn't echoed or kept in history
+printf '%s\n' "$SRC_URL" | sudo docker run --rm -i -v /tmp:/out postgres:17-alpine \
+  sh -c 'read -r SRC_URL; pg_dump "$SRC_URL" -Fc --no-owner --no-privileges -f /out/app.dump'
+NEW_DB=$(sudo docker ps -q --filter name=my-app-production-postgres)
+sudo docker cp /tmp/app.dump "$NEW_DB":/tmp/app.dump
+sudo docker exec "$NEW_DB" pg_restore -U my_app -d my_app --no-owner --no-privileges --single-transaction /tmp/app.dump
+```
+Compare row counts as above; for the old side, pipe `$SRC_URL` into the same throwaway image and run
+`psql "$SRC_URL" -c "select count(*) from <table>"`. Then `unset SRC_URL` and delete the dump from the
+host and the container. Objects the provider installs (e.g. Neon's `neon` schema) can make the restore
+fail; it rolls back, so leave them out and run it again:
+```sh
+sudo docker exec "$NEW_DB" pg_restore -l /tmp/app.dump > /tmp/app.list
+# delete the provider's lines from /tmp/app.list, keep everything else
+sudo docker cp /tmp/app.list "$NEW_DB":/tmp/app.list
+sudo docker exec "$NEW_DB" pg_restore -U my_app -d my_app --no-owner --no-privileges --single-transaction -L /tmp/app.list /tmp/app.dump
+```
+Keep the external database until 7.8: it's the rollback.
 
 **Redis:** usually a cache or a queue that refills: start empty. If it holds data that must survive
 (sessions you can't lose, persistent queues): `redis-cli SAVE` in the old one, then copy its volume's
@@ -509,9 +582,11 @@ Release `v1.0.0` exists and that `1.0.0` is exactly the release commit's build, 
 - **Internal apps** (called by other apps): in each caller's Environment (from 1.3), point the URL at
   `http://<new production app name>:<port>`, save, redeploy that caller. If the caller is itself managed
   in `deployments`, change it in its `project.yaml` instead (a PR).
-- **Public apps** (once 5.3 exists): remove the domain from the **old** app in the Dokploy UI first, then
-  run the `deployments` apply that adds it to the new one (re-run the production deploy, or a `tofu` run).
-  DNS doesn't change (same host), and Traefik reuses the certificate it already has for that name.
+- **Public apps:** remove the domain from the **old** app in the Dokploy UI first, then merge the
+  `deployments` PR that adds it under `production` (prepared and approved before the window, 5.3). The
+  merge applies. Never both at once (5.3). DNS doesn't change (same host). Traefik should reuse the
+  certificate it already has for that name **[untested]**; if the browser shows a certificate error,
+  give it a minute for Let's Encrypt.
 - Check end to end through a real user flow (onboarding-service: the admin's records list showed the old
   records).
 
@@ -520,7 +595,8 @@ Add the `deploy-production` job to the app's `release.yml` (section 3.2), merge.
 release PR deploys that release to production.
 
 ### Rollback (until 7.8)
-Point the callers (or the domain) back at the old app, redeploy them, start the old app. Data written to
+Point the callers back at the old app and redeploy them, or revert the domain PR and add the domain
+back to the old app (in that order), then start the old app. Data written to
 the new app since 7.5 isn't in the old one: copy it back the same way, or accept the loss if nothing was
 written.
 
@@ -533,8 +609,10 @@ deploys happen by merging (staging) and releasing (production), and the Dokploy 
 Delete the old Dokploy project, then its volumes and databases on the host (`sudo docker volume rm
 <old volume>`), after checking the new app ran fine all week. **Except** if the new app still uses a
 database in the old project (the exception in 5.4): then keep that project and database until the
-database itself has been migrated and verified, and delete only the old app in it. Update the app's row in the status table at
-the top of this guide if it needed something new.
+database itself has been migrated and verified, and delete only the old app in it. Delete an external
+database (Neon, …) at its provider. Revoke every old secret where it was issued (4.2): API keys, bot
+tokens, OAuth client secrets, the external database's credentials. Update the status table at the top of
+this guide if the app needed something new.
 
 ---
 
@@ -543,7 +621,7 @@ the top of this guide if it needed something new.
 ```
 Inventory
 [ ] 1.1–1.3  config, env names, secrets, volumes, databases, domains, callers, background work
-[ ] 2        staging secrets, build-time env, domains, version, window
+[ ] 2        production or staging only, staging secrets, build-time env, domains, version, window
 App repo
 [ ] 3.1      public, history scanned, runtime config only
 [ ] 3.2–3.4  pr.yml, build.yml, release.yml, release-please config (include-component-in-tag false), CODEOWNERS
@@ -552,20 +630,21 @@ App repo
 [ ] 3.7      first image pushed, pulls logged out
 infrastructure + OpenBao
 [ ] 4.1      projects.yaml line, merged and applied
-[ ] 4.2      production and staging secrets written, checked by length
+[ ] 4.2      new production and staging secrets written (none copied), checked by length
 deployments
 [ ] 5.1–5.2  project.yaml, release.yaml (nulls), dropdown option; merged; idle apps visible
-[ ] 5.3–5.4  domains / databases, if needed (not yet built)
+[ ] 5.3      staging's DNS + domain; production's domain PR prepared, not merged
+[ ] 5.4      databases + their names in secrets (after deployments#19)
 Staging
 [ ] 6.1–6.2  deployed by hand, checked
 [ ] 6.3      deploy-staging job
 [ ] 6.4      first release
 Switchover
 [ ] 7.1      old app: auto-deploy off, stopped
-[ ] 7.2      data copied into an empty destination; diff -r clean
+[ ] 7.2      volumes and database copied into an empty destination; diff -r / row counts match
 [ ] 7.3–7.4  production deployed and checked
-[ ] 7.5      callers / domain switched, end-to-end check
+[ ] 7.5      callers switched / domain removed from old app, then PR merged; end-to-end check
 [ ] 7.6      deploy-production job
 [ ] 7.7      maintainers told
-[ ] 7.8      a week later: old project and data deleted (not a database still in use)
+[ ] 7.8      a week later: old project, data and external database deleted; old secrets revoked
 ```
