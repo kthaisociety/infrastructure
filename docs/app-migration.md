@@ -433,8 +433,10 @@ Until #19 is merged, an app with a database waits.
 - The database and user are the project name with `_` for `-` (`my_app`).
 - **Backups:** not yet (IT-18), needs a GleSYS destination in OpenTofu.
 - If the app's current database has to stay a while longer (agree with an infra admin first): leave
-  `databases` out, change the old database's password, put its connection settings in OpenBao as
-  ordinary secrets, and migrate the database later.
+  `databases` out and migrate the database later. Change its password in 7.1, not now: the old app
+  keeps connecting with the current one until it's stopped, and a rollback restarts it. Then write the
+  connection settings to OpenBao as ordinary production secrets, and put the new password in the old
+  app's Environment too.
 
 ---
 
@@ -473,16 +475,20 @@ A staging-only app skips this until it's ready for production.
 
 ## 7. Data migration and switchover
 
-Before: production's secrets written (4.2), the release built (6.4), the steps below read through, the
+Before: production's secrets written (4.2; a kept database's password waits for 7.1), the release built (6.4), the steps below read through, the
 rollback understood, and a time when the app is least used. Each step: check before the next.
 
 **A staging-only app** does this whole section on **staging**: copy into staging's volumes and database,
-skip 7.3 (staging already runs the latest build; redeploy its current `sha-<7>` after the copy if the app
-must start on the copied data), and skip 7.6.
+skip 7.3, and skip 7.6. Staging is already running, and has created its files and schema, so before
+the copy: no merges to the app's `main` until it's done (each one redeploys staging), **Stop** the
+staging app in Dokploy, and empty its volume and database (7.2). After the copy, redeploy its current
+`sha-<7>`.
 
 ### 7.1 Freeze the old app
 Dokploy → old project → app: **Auto Deploy off** (otherwise a push to the repo rebuilds and restarts
 it), then **Stop**. From here until 7.5 the app is down. Stop its database too only after its dump (7.2).
+A database kept in the old project (the exception in 5.4): change its password now, then write it to
+OpenBao and the old app's Environment.
 
 ### 7.2 Copy the data
 
@@ -517,14 +523,18 @@ NEW_DB=$(sudo docker ps -q --filter name=my-app-production-postgres)   # its dat
 sudo docker exec "$OLD_DB" pg_dump -U <old user> -d <old db> -Fc -f /tmp/app.dump
 sudo docker cp "$OLD_DB":/tmp/app.dump /tmp/app.dump
 sudo docker cp /tmp/app.dump "$NEW_DB":/tmp/app.dump
-sudo docker exec "$NEW_DB" pg_restore -U <new user> -d <new db> --no-owner --no-privileges --exit-on-error /tmp/app.dump
+sudo docker exec "$NEW_DB" pg_restore -U <new user> -d <new db> --no-owner --no-privileges --single-transaction /tmp/app.dump
 # check: row counts of the main tables match on both sides
 sudo docker exec "$OLD_DB" psql -U <old user> -d <old db> -c "select count(*) from <table>"
 sudo docker exec "$NEW_DB" psql -U <new user> -d <new db> -c "select count(*) from <table>"
 sudo rm /tmp/app.dump; sudo docker exec "$OLD_DB" rm /tmp/app.dump; sudo docker exec "$NEW_DB" rm /tmp/app.dump
 ```
-- Restore into an empty database; the new app's migrations should run after, not before, unless the app
-  requires its schema first (then restore data only: `--data-only`).
+- **Restore into an empty database**; the new app's migrations should run after, not before, unless the
+  app requires its schema first (then restore data only: `--data-only`). If the app already ran against
+  it (staging), empty it first **[untested]**:
+  `sudo docker exec "$NEW_DB" psql -U my_app -d my_app -c 'drop schema public cascade; create schema public;'`
+- **`--single-transaction`**: a failed restore rolls back entirely (it implies `--exit-on-error`), so
+  the database is still empty and the same command can run again once the cause is fixed.
 - Same or newer Postgres major version on the new side (ours is 17). `pg_dump` from the newer version
   if they differ.
 - The dump contains everything in the database: delete it from the host when done.
@@ -539,12 +549,18 @@ printf '%s\n' "$SRC_URL" | sudo docker run --rm -i -v /tmp:/out postgres:17-alpi
   sh -c 'read -r SRC_URL; pg_dump "$SRC_URL" -Fc --no-owner --no-privileges -f /out/app.dump'
 NEW_DB=$(sudo docker ps -q --filter name=my-app-production-postgres)
 sudo docker cp /tmp/app.dump "$NEW_DB":/tmp/app.dump
-sudo docker exec "$NEW_DB" pg_restore -U my_app -d my_app --no-owner --no-privileges --exit-on-error /tmp/app.dump
+sudo docker exec "$NEW_DB" pg_restore -U my_app -d my_app --no-owner --no-privileges --single-transaction /tmp/app.dump
 ```
 Compare row counts as above; for the old side, pipe `$SRC_URL` into the same throwaway image and run
 `psql "$SRC_URL" -c "select count(*) from <table>"`. Then `unset SRC_URL` and delete the dump from the
-host and the container. Extensions the provider installs (e.g. Neon's
-`neon` schema objects) can make `--exit-on-error` stop: restore again without it and read every error.
+host and the container. Objects the provider installs (e.g. Neon's `neon` schema) can make the restore
+fail; it rolls back, so leave them out and run it again:
+```sh
+sudo docker exec "$NEW_DB" pg_restore -l /tmp/app.dump > /tmp/app.list
+# delete the provider's lines from /tmp/app.list, keep everything else
+sudo docker cp /tmp/app.list "$NEW_DB":/tmp/app.list
+sudo docker exec "$NEW_DB" pg_restore -U my_app -d my_app --no-owner --no-privileges --single-transaction -L /tmp/app.list /tmp/app.dump
+```
 Keep the external database until 7.8: it's the rollback.
 
 **Redis:** usually a cache or a queue that refills: start empty. If it holds data that must survive
