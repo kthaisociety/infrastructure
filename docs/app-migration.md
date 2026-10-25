@@ -17,9 +17,9 @@ the migration:
 It's a rebuild next to the old app, not an import: nothing about the old app changes until the
 switchover, and rolling back is pointing back at it.
 
-**The pipeline doesn't do yet:** database backups (IT-18), object storage per project (IT-39), build
-arguments, build-time env (section 2). An app that needs one waits for it, or the first such app adds it
-to `deployments`' `modules/project` (one PR, reviewed like any other), then migrates.
+**The pipeline doesn't do yet:** object storage per project (IT-39), build arguments, build-time env
+(section 2). An app that needs one waits for it, or the first such app adds it to `deployments`'
+`modules/project` (one PR, reviewed like any other), then migrates.
 
 **Who:** someone with admin on the GitHub org, admin in Dokploy, the `infra-admin` login to OpenBao, and
 SSH to the Dokploy host. Anyone can do the inventory and prepare the PRs; pair with an infra admin for the
@@ -187,7 +187,9 @@ environments:
 - **Databases:** `postgres: {}`, `redis: {}` (versions 17 and 7 unless `image:` says otherwise). The
   pipeline generates their credentials into OpenBao; nobody writes them. The app gets `DATABASE_URL`,
   `PGHOST`, `REDIS_URL`, … only for the names listed in `secrets` (`docs/project-yaml.md` lists them per
-  engine). The database and user are the project name with `_` for `-` (`my_app`).
+  engine). The database and user are the project name with `_` for `-` (`my_app`). Production's
+  Postgres is backed up every five days with nothing to add; `backups:` under `postgres` changes when
+  and how many ([database-backups.md](database-backups.md)).
 - **Volumes** (`volumes: { /data: data }`): only if the app keeps files; avoid.
 - **Production's real domain is not in this PR**: the old app still serves that host, and two Traefik
   routes for one host is undefined behaviour. Open it now as a separate PR, get it approved, and merge it
