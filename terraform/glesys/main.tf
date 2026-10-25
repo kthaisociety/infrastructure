@@ -36,6 +36,25 @@ resource "glesys_objectstorage_credential" "openbao_snapshots" {
   description = "openbao snapshot sidecar"
 }
 
+# --- Database backups --------------------------------------------------------
+
+# Dokploy's backups of the production databases (docs/database-backups.md), in the
+# kthais-database-backups bucket, made by hand.
+resource "glesys_objectstorage_instance" "database_backups" {
+  datacenter  = var.datacenter
+  description = "database-backups"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Used by Dokploy's database-backups destination (terraform/dokploy/core.tf).
+resource "glesys_objectstorage_credential" "database_backups" {
+  instanceid  = glesys_objectstorage_instance.database_backups.id
+  description = "dokploy database backups"
+}
+
 # --- Existing app storage ----------------------------------------------------
 
 # Dokploy's backup destination for the website's Postgres.

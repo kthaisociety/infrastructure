@@ -7,3 +7,11 @@ output "openbao_snapshots" {
   }
   sensitive = true
 }
+
+output "database_backups" {
+  value = {
+    access_key = glesys_objectstorage_credential.database_backups.accesskey
+    secret_key = glesys_objectstorage_credential.database_backups.secretkey
+  }
+  sensitive = true
+}
