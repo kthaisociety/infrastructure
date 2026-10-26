@@ -47,7 +47,7 @@ The same steps as `deployments/README.md`, "Adding a project":
 Removing a project goes the other way round. First remove it from `deployments` and run
 `kthais-local apply deployments`, then remove its line from `projects.yaml` and run
 `kthais-local apply infrastructure`. In the other order, the project's OpenBao policies go first, and
-deployments' apply can no longer read the database credentials it has to delete.
+deployments' apply can lose access to what it has to delete there (database credentials: a 403).
 
 A project with databases can't be removed by deleting lines: deployments refuses to delete data
 (`prevent_destroy`, its `docs/project-yaml.md`). Locally, start over instead: `kthais-local destroy`, then
