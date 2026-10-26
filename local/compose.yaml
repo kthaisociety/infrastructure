@@ -1,0 +1,47 @@
+# The local "server": one privileged Docker-in-Docker container with its own Docker Engine and swarm,
+# where Dokploy, its Traefik and everything Dokploy deploys run. Your Docker Desktop only sees this one
+# container. Managed by ./kthais-local (up, stop, start, destroy).
+name: kthais-local
+
+services:
+  server:
+    # Production's Docker Engine (docs/openbao-deploy.md, C0: 29.8.1).
+    image: docker:29.8.1-dind
+    container_name: kthais-dokploy
+    hostname: kthais-dokploy
+    privileged: true
+    restart: unless-stopped
+    # The Engine on its unix socket only: the image's default also listens on tcp://0.0.0.0:2375, which
+    # any container on Docker Desktop's network could reach.
+    command: ["dockerd", "--host=unix:///var/run/docker.sock"]
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    networks:
+      server:
+        # Fixed, because the swarm advertises it: a new address after a restart would break the swarm.
+        ipv4_address: 172.29.170.10
+    ports:
+      - "127.0.0.1:3000:3000" # Dokploy
+      - "127.0.0.1:8080:80" # Traefik, http: apps at http://<name>.localhost:8080
+      - "127.0.0.1:8443:443" # Traefik, https: OpenBao at https://bao.localhost:8443
+    volumes:
+      - engine:/var/lib/docker
+      - etc-dokploy:/etc/dokploy
+      - etc-openbao:/etc/openbao
+      # The repos read-only: the local pipeline copies them, like a CI checkout, and never writes there.
+      # This infrastructure checkout, and the deployments one kthais-local finds (KTHAIS_DEPLOYMENTS).
+      - ..:/workspace/infrastructure:ro
+      - ${KTHAIS_DEPLOYMENTS:?run this through kthais-local}:/workspace/deployments:ro
+      # local/ itself, writable for .state.
+      - .:/workspace/local
+
+networks:
+  server:
+    ipam:
+      config:
+        - subnet: 172.29.170.0/24
+
+volumes:
+  engine:
+  etc-dokploy:
+  etc-openbao:

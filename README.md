@@ -17,6 +17,8 @@ Dokploy projects and the images they run) are in
 - [docs/plan.md](docs/plan.md): the platform's plan (OpenBao, state, disaster recovery);
   [docs/openbao-deploy.md](docs/openbao-deploy.md): how OpenBao was deployed;
   [docs/openbao-recovery.md](docs/openbao-recovery.md): root token or CI login trouble.
+- [local/README.md](local/README.md): a local copy of the platform, built by this repo's and
+  `deployments`' real OpenTofu, for trying a change before its PR.
 
 | Path | What | Status |
 |---|---|---|
@@ -26,6 +28,7 @@ Dokploy projects and the images they run) are in
 | `terraform/openbao/projects.yaml` | Every project's OpenBao side, one line each (`my-app: {}`): its policies and empty secret paths | `onboarding-service` |
 | `terraform/modules/project-secrets/` | One project environment's policy, empty path (and, for now, a provider token) | Applied |
 | `terraform/gcp/` | The identity and Mattermost projects on Google Cloud: owners, APIs, service accounts. CI signs in through a third project, the only one made by hand ([docs/gcp.md](docs/gcp.md)) | Applied |
+| `local/` | `kthais-local`: the platform on your machine, in Docker, for testing changes to this repo and `deployments` | Local only |
 
 State is stored encrypted in GleSYS Object Storage. Pull requests run checks and, after a reviewer
 approves, `tofu plan`; merges to `main` run `tofu apply` from the `production` environment. Nothing is

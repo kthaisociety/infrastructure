@@ -1,0 +1,369 @@
+#!/usr/bin/env bash
+# kthais-local: KTHAIS's Dokploy platform on this machine, built by the real infrastructure and
+# deployments OpenTofu through a local stand-in for their CI. README.md has the details.
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+STATE=$HERE/.state
+# The infrastructure checkout this is in, and a deployments checkout: next to it unless
+# KTHAIS_DEPLOYMENTS says where.
+INFRASTRUCTURE=$(cd "$HERE/.." && pwd)
+DEPLOYMENTS=${KTHAIS_DEPLOYMENTS:-$INFRASTRUCTURE/../deployments}
+SERVER=kthais-dokploy
+SERVER_ADDR=172.29.170.10 # compose.yaml's fixed address, which the swarm advertises
+RUNNER=kthais-local-runner
+DOKPLOY=http://localhost:3000
+ADMIN_EMAIL=admin@kthais.localhost
+
+say() { printf '\033[1;32m==> %s\033[0m\n' "$*"; }
+die() {
+  printf '\033[1;31merror: %s\033[0m\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+usage: kthais-local <command>
+
+  up                              start everything; the first run builds it all (Dokploy, OpenBao, both repos)
+  apply [infrastructure|deployments|all]
+                                  what a merge to main runs: the PR checks, then tofu apply (default: all)
+  plan [infrastructure|deployments]
+                                  the checks and a plan, applying nothing
+  deploy <project> <env> <tag>    deploy.yml: resolve the tag's digest in GHCR, record it locally, apply
+  bao <args...>                   the OpenBao CLI on the server, as root (e.g. bao kv put secret/my-app/staging K=V)
+  tofu <root> <args...>           any tofu command in infrastructure/dokploy, infrastructure/openbao or deployments
+  status                          what's running, URLs and where the credentials are
+  stop | start                    stop or start the server, keeping everything
+  destroy                         delete the server, its volumes and local/.state
+
+The deployments checkout is ../deployments next to this infrastructure checkout, or KTHAIS_DEPLOYMENTS.
+EOF
+}
+
+# compose.yaml mounts both checkouts, so every compose command gets the deployments one, made absolute.
+compose() {
+  [ -d "$DEPLOYMENTS/terraform" ] && [ -d "$DEPLOYMENTS/projects" ] ||
+    die "no deployments checkout at $DEPLOYMENTS: clone kthaisociety/deployments there, or set KTHAIS_DEPLOYMENTS"
+  KTHAIS_DEPLOYMENTS=$(cd "$DEPLOYMENTS" && pwd) docker compose -f "$HERE/compose.yaml" "$@"
+}
+
+# A command on the server. server_i passes stdin through; server never reads it, so it can't swallow a
+# heredoc meant for a later command.
+server() { docker exec "$SERVER" "$@" </dev/null; }
+server_i() { docker exec -i "$SERVER" "$@"; }
+
+# A local job (jobs/<name>.sh) in the runner, on the server's dokploy-network, as you.
+job() {
+  local name=$1
+  shift
+  server docker run --rm --network dokploy-network --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v /workspace/infrastructure:/workspace/infrastructure:ro \
+    -v /workspace/deployments:/workspace/deployments:ro \
+    -v /workspace/local:/workspace/local \
+    "$RUNNER" bash "/workspace/local/jobs/$name.sh" "$@"
+}
+
+require_running() {
+  [ "$(docker inspect -f '{{.State.Running}}' "$SERVER" 2>/dev/null)" = true ] ||
+    die "the server isn't running: kthais-local start (or up)"
+}
+
+# --- up ----------------------------------------------------------------------------------------------
+
+# Keys and passphrases only this machine has: the JWT signer that stands in for GitHub's OIDC, and one
+# state passphrase per repo, as in production.
+ensure_state() {
+  mkdir -p "$STATE"/{jwt,tofu,releases}
+  chmod 700 "$STATE"
+  if [ ! -f "$STATE/jwt/ci.key.pem" ]; then
+    (umask 077 && openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$STATE/jwt/ci.key.pem" 2>/dev/null)
+    openssl pkey -in "$STATE/jwt/ci.key.pem" -pubout -out "$STATE/jwt/ci.pub.pem"
+  fi
+  local r
+  for r in infrastructure deployments; do
+    [ -f "$STATE/passphrase-$r" ] || (umask 077 && openssl rand -base64 32 >"$STATE/passphrase-$r")
+  done
+}
+
+ensure_server() {
+  say "The server (Docker-in-Docker, $SERVER)"
+  compose up -d --quiet-pull
+  wait_engine
+  server sh /workspace/local/host/install-dokploy.sh "$SERVER_ADDR"
+  wait_dokploy
+}
+
+# The server's own Docker Engine, which starts a few seconds after its container.
+wait_engine() {
+  local i
+  for i in $(seq 60); do
+    server docker info >/dev/null 2>&1 && return
+    [ "$i" = 60 ] && die "the server's Docker Engine didn't start: docker logs $SERVER"
+    sleep 1
+  done
+}
+
+wait_dokploy() {
+  local i
+  printf 'Waiting for Dokploy'
+  for i in $(seq 120); do
+    if [ "$(curl -s -o /dev/null -w '%{http_code}' "$DOKPLOY/api/auth/get-session")" = 200 ]; then
+      echo
+      return
+    fi
+    [ "$i" = 120 ] && die "Dokploy didn't answer at $DOKPLOY: kthais-local status"
+    printf .
+    sleep 2
+  done
+}
+
+# The owner account (the UI's first sign-up) and its API key, rate limiting off (runbook A2: a
+# rate-limited key answers 401 mid-apply).
+ensure_admin() {
+  [ -s "$STATE/dokploy-api-key" ] && return
+  say "Dokploy's admin and API key"
+  [ -f "$STATE/dokploy-admin" ] ||
+    (umask 077 && printf 'email=%s\npassword=%s\n' "$ADMIN_EMAIL" "$(openssl rand -base64 24 | tr -d '=+/')" >"$STATE/dokploy-admin")
+  local jar password org key code i
+  password=$(sed -n 's/^password=//p' "$STATE/dokploy-admin")
+  jar=$(mktemp)
+  # A new Dokploy can answer HTTP before its auth accepts a sign-in (the Dokploy provider's acceptance
+  # rig hits this), so: sign up, then sign in, until the sign-in works. Once the account exists, sign-up
+  # fails, which is expected. Responses aren't printed: they hold session tokens.
+  for i in $(seq 60); do
+    curl -s -o /dev/null -H 'Content-Type: application/json' -H "Origin: $DOKPLOY" \
+      -d "$(jq -cn --arg e "$ADMIN_EMAIL" --arg p "$password" '{email: $e, password: $p, name: "Local", lastName: "Admin"}')" \
+      "$DOKPLOY/api/auth/sign-up/email" || true
+    code=$(curl -s -o /dev/null -w '%{http_code}' -c "$jar" -H 'Content-Type: application/json' -H "Origin: $DOKPLOY" \
+      -d "$(jq -cn --arg e "$ADMIN_EMAIL" --arg p "$password" '{email: $e, password: $p}')" \
+      "$DOKPLOY/api/auth/sign-in/email" || true)
+    case $code in 2??) break ;; esac
+    [ "$i" = 60 ] && die "Dokploy didn't accept the admin's sign-in within 3 minutes (last HTTP $code)"
+    sleep 3
+  done
+  org=$(curl -sSf -b "$jar" -H "Origin: $DOKPLOY" "$DOKPLOY/api/auth/organization/list" | jq -r '.[0].id')
+  key=$(curl -sSf -b "$jar" -H 'Content-Type: application/json' -H "Origin: $DOKPLOY" \
+    -d "$(jq -cn --arg o "$org" '{json: {name: "local-tofu", metadata: {organizationId: $o}, rateLimitEnabled: false}}')" \
+    "$DOKPLOY/api/trpc/user.createApiKey" | jq -r '.result.data.json.key')
+  rm -f "$jar"
+  [ -n "$key" ] && [ "$key" != null ] || die "couldn't create Dokploy's API key"
+  (umask 077 && printf '%s' "$key" >"$STATE/dokploy-api-key")
+}
+
+# Rebuilt only when runner/ changes.
+ensure_runner() {
+  local want have
+  want=$(cat "$HERE/runner/Dockerfile" "$HERE/runner/gh" | sha256sum | cut -c1-16)
+  have=$(server docker image inspect -f '{{index .Config.Labels "kthais.local.hash"}}' "$RUNNER" 2>/dev/null || true)
+  [ "$want" = "$have" ] && return
+  say "The runner image"
+  server docker build -q --label "kthais.local.hash=$want" -t "$RUNNER" /workspace/local/runner >/dev/null
+}
+
+# Runbook A4, on the server.
+ensure_unseal_key() {
+  server sh -c '
+    [ -f /etc/openbao/unseal.key ] && exit 0
+    install -d -m 0755 /etc/openbao
+    (umask 077 && openssl rand -out /etc/openbao/unseal.key 32)
+    chown 100:1000 /etc/openbao/unseal.key
+    chmod 0400 /etc/openbao/unseal.key'
+}
+
+openbao_container() {
+  server docker ps -q --filter label=com.docker.compose.service=openbao | head -1
+}
+
+# The OpenBao CLI in its container, at its own listener. Root token from the local init.
+bao_exec() {
+  local c token
+  c=$(openbao_container)
+  [ -n "$c" ] || die "OpenBao isn't running on the server"
+  token=$(jq -r .root_token "$STATE/openbao-init.json" 2>/dev/null || true)
+  server_i docker exec -i -e BAO_ADDR=http://127.0.0.1:8200 ${token:+-e "BAO_TOKEN=$token"} "$c" bao "$@"
+}
+
+auth_enabled() {
+  bao_exec auth list -format=json </dev/null | jq -e --arg p "$1/" 'has($p)' >/dev/null
+}
+
+# Runbook parts A and B: OpenBao first deployed privately, initialized by hand, CI's login made, then
+# made reachable. Locally the root token is kept (runbook B5 revokes it) so `kthais-local bao` works, and
+# CI's login trusts the local signer instead of GitHub. Each step is safe to repeat, so a failed bootstrap
+# continues where it stopped on the next `up`.
+bootstrap_openbao() {
+  ensure_unseal_key
+
+  if [ ! -s "$STATE/openbao-init.json" ]; then
+    say "OpenBao, private and not initialized yet (runbook A5)"
+    job infrastructure apply-dokploy -var openbao_initialized=false -var openbao_public=false
+
+    local i rc
+    for i in $(seq 60); do
+      rc=1
+      [ -z "$(openbao_container)" ] || bao_exec status </dev/null >/dev/null 2>&1 || rc=$?
+      # 2: sealed or not initialized, which is what's expected here.
+      case $rc in 0 | 2) break ;; esac
+      [ "$i" = 60 ] && die "OpenBao didn't start on the server"
+      sleep 2
+    done
+
+    say "Init (runbook B1): one recovery key, locally"
+    (umask 077 && bao_exec operator init -recovery-shares=1 -recovery-threshold=1 -format=json </dev/null >"$STATE/openbao-init.json.tmp")
+    mv "$STATE/openbao-init.json.tmp" "$STATE/openbao-init.json"
+  fi
+
+  say "CI's login (runbook B2), trusting the local signer in GitHub's place"
+  bao_exec policy write terraform - <<'EOF'
+path "*" {
+  capabilities = ["create", "read", "update", "patch", "delete", "list", "sudo"]
+}
+EOF
+  auth_enabled jwt || bao_exec auth enable jwt </dev/null
+  jq -n --rawfile key "$STATE/jwt/ci.pub.pem" \
+    '{bound_issuer: "https://ci.kthais.localhost", jwt_validation_pubkeys: [$key]}' |
+    bao_exec write auth/jwt/config -
+  local sub
+  sub=$(sed -nE 's/^ *bound_claims *= *\{ *sub *= *"([^"]+)".*/\1/p' "$INFRASTRUCTURE/terraform/openbao/main.tf")
+  jq -n --arg sub "$sub" '{
+    role_type: "jwt", user_claim: "sub", bound_audiences: ["https://bao.kthais.com"],
+    bound_claims: {sub: $sub}, token_policies: ["terraform"], token_ttl: "30m", token_max_ttl: "1h"
+  }' | bao_exec write auth/jwt/role/infrastructure-ci -
+
+  say "Userpass (runbook B3; no users locally, the root token is kept)"
+  auth_enabled userpass || bao_exec auth enable userpass </dev/null
+
+  say "OpenBao on dokploy-network and routed (runbook C1)"
+  job infrastructure apply-dokploy
+
+  # On a brand-new OpenBao, writes that come right after the `secret` mount is created fail while the
+  # mount upgrades itself to KV v2 ("Upgrading from non-versioned to versioned data"). Production would
+  # hit this too when rebuilding OpenBao from scratch. Once, then retry; any other failure stops here.
+  say "infrastructure's first apply (runbook D)"
+  local log
+  log=$(mktemp)
+  if ! job infrastructure apply 2>&1 | tee "$log"; then
+    grep -q "Upgrading from non-versioned to versioned data" "$log" ||
+      die "infrastructure's first apply failed (above)"
+    say "The KV v2 upgrade race on the new mount (expected once): applying again"
+    job infrastructure apply
+  fi
+  rm -f "$log"
+  touch "$STATE/openbao-bootstrapped"
+}
+
+cmd_up() {
+  command -v docker >/dev/null || die "docker isn't installed"
+  ensure_state
+  ensure_server
+  ensure_admin
+  ensure_runner
+  if [ -f "$STATE/openbao-bootstrapped" ]; then
+    cmd_apply all
+  else
+    bootstrap_openbao # ends with infrastructure's first apply
+    cmd_apply deployments
+  fi
+  cmd_status
+}
+
+# --- the pipeline ------------------------------------------------------------------------------------
+
+cmd_apply() {
+  require_running
+  ensure_runner
+  case ${1:-all} in
+    infrastructure) job infrastructure apply ;;
+    deployments) job deployments apply ;;
+    all)
+      job infrastructure apply
+      job deployments apply
+      ;;
+    *) die "apply: infrastructure, deployments or all" ;;
+  esac
+}
+
+cmd_plan() {
+  require_running
+  ensure_runner
+  case ${1:-} in
+    infrastructure | deployments) job "$1" plan ;;
+    *) die "plan: infrastructure or deployments" ;;
+  esac
+}
+
+cmd_deploy() {
+  [ $# -eq 3 ] || die "usage: kthais-local deploy <project> <env> <tag>"
+  require_running
+  ensure_runner
+  job deploy "$@"
+}
+
+cmd_tofu() {
+  [ $# -ge 2 ] || die "usage: kthais-local tofu <infrastructure/dokploy|infrastructure/openbao|deployments> <args...>"
+  require_running
+  ensure_runner
+  job tofu "$@"
+}
+
+cmd_bao() {
+  require_running
+  bao_exec "$@"
+}
+
+# --- lifecycle ---------------------------------------------------------------------------------------
+
+cmd_status() {
+  if [ "$(docker inspect -f '{{.State.Running}}' "$SERVER" 2>/dev/null)" != true ]; then
+    echo "The server isn't running. Start it: kthais-local start (or up, the first time)"
+    return
+  fi
+  say "Swarm services"
+  server docker service ls --format '  {{.Name}}  {{.Replicas}}  {{.Image}}'
+  say "Containers"
+  server docker ps --format '  {{.Names}}  {{.Status}}'
+  say "OpenBao"
+  if [ -n "$(openbao_container)" ]; then
+    bao_exec status -format=json 2>/dev/null | jq -r '"  initialized: \(.initialized), sealed: \(.sealed)"' || true
+  else
+    echo "  not deployed"
+  fi
+  cat <<EOF
+
+  Dokploy   $DOKPLOY             sign in: $STATE/dokploy-admin
+  OpenBao   https://bao.localhost:8443  (Traefik's own certificate) token: jq -r .root_token $STATE/openbao-init.json
+  Apps      http://<host>.localhost:8080 for domains with https: false
+EOF
+}
+
+cmd_stop() { compose stop; }
+cmd_start() {
+  compose start
+  wait_engine
+  wait_dokploy
+  cmd_status
+}
+
+cmd_destroy() {
+  echo "This deletes the server ($SERVER), its volumes (Dokploy, OpenBao, every app's data)"
+  echo "and $STATE (keys, credentials, local state). The repos aren't touched."
+  read -r -p "Type 'destroy' to confirm: " answer
+  [ "$answer" = destroy ] || die "not confirmed; nothing deleted"
+  compose down -v
+  rm -rf "$STATE"
+  say "Deleted."
+}
+
+case ${1:-} in
+  up | apply | plan | deploy | tofu | bao | status | stop | start | destroy)
+    c=$1
+    shift
+    "cmd_$c" "$@"
+    ;;
+  -h | --help | help | "") usage ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
