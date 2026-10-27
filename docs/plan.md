@@ -563,7 +563,10 @@ Every root module is planned on PRs and applied on merge to `main` by GitHub Act
   credentials can't be read-only, so plan and apply use the same ones. Plans run with `-lock=false`.
 - **Where the secrets live:** in two GitHub environments holding the same values, never at repo level.
   `production` (apply) is limited to `main`, with no admin bypass. `plan` (PR plans) needs approval from
-  an infra admin (`sammosios`, `vilhelmprytz`); admins can approve their own runs.
+  `@kthaisociety/platform-engineers` or `vilhelmprytz`, the same in `deployments`. Reviewers can
+  approve their own runs and org owners can bypass. The approval is what keeps these secrets from GitHub
+  Apps with write access to this public repo (Greptile, Claude): their pushes start workflows too, but
+  they can't approve a run.
 - **Apply** runs only in the `production` environment, limited to `main`.
 - **Order on merge:** `glesys` → `openbao` → `dokploy`, as jobs in one workflow, all on GitHub-hosted
   runners. On the very first build the order is different (see [Bootstrap order](#bootstrap-order)).
