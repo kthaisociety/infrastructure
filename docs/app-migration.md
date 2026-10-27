@@ -76,8 +76,13 @@ EOF
 
 ### 1.2 Check it against the app itself
 What Dokploy holds can be incomplete or stale. Compare it with the app's `.env.example`, its config
-code and its README, and ask its maintainers. Every setting the app reads must end up in one of
-`env`, `secrets` or `shared` in `project.yaml`.
+code and its README, and ask its maintainers. Every setting the app uses in production must end up in
+one of `env`, `secrets` or `shared` in `project.yaml`.
+
+A setting the app reads but production doesn't use (left unset, or commented out, which the script
+above skips) stays out. Listing it means issuing a new secret for something nothing uses, and a
+service secret for a service that isn't running is one more working key: whoever holds it can call the
+app as that service. Check that the app runs without it; if unsure, ask its maintainers.
 
 ### 1.3 Fill in this checklist
 | | Write down | Example |
@@ -107,7 +112,8 @@ domain and no callers, nothing reaches it.
 Search every app's env for the old app's internal name (`appName`) and its domains: in Dokploy, each
 project's Environment tab, or the script above per project. Those env vars change at the switchover.
 
-**Done when** every row has an answer, and every setting the app reads has a name in the list.
+**Done when** every row has an answer, and every setting the app uses in production has a name in the
+list.
 
 ---
 
