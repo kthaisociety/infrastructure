@@ -1,7 +1,7 @@
 # Database backups
 
 Every production Postgres that `kthaisociety/deployments` creates (`databases: {postgres: {}}` in a
-`project.yaml`) is backed up by Dokploy every five days to GleSYS object storage. Nothing to do per
+`project.yaml`) is backed up by Dokploy every day to GleSYS object storage. Nothing to do per
 project: the project gets its backup with its database. This page is what's backed up, where, and how
 to restore.
 
@@ -9,8 +9,8 @@ to restore.
 |---|---|
 | What | Each project's **production** Postgres: `pg_dump -Fc`, gzipped by Dokploy |
 | Not | Staging; Redis; Postgres outside the pipeline (the website's has its own, in `website-psql-backups`) |
-| When | Every fifth day at 00:00 UTC (Dokploy's clock): the 1st, 6th, 11th, 16th, 21st, 26th and 31st of each month (`0 0 */5 * *`), unless the project sets its own `schedule` |
-| Kept | The last 30 dumps of each database (about five months), unless the project sets its own `keep` |
+| When | Every day at 00:00 UTC (Dokploy's clock, `0 0 * * *`), unless the project sets its own `schedule` |
+| Kept | The last 30 dumps of each database (a month, at the default schedule), unless the project sets its own `keep` (at least 7) |
 | Where | GleSYS instance `database-backups`, bucket `kthais-database-backups`, `<app_name>/<timestamp>.sql.gz` |
 
 A project changes when and how many in its `project.yaml`, under `databases.postgres.backups`
@@ -38,8 +38,34 @@ Destinations → `database-backups` → **Test Connection**. Not in OpenTofu: th
 apply (`verify_connection`), but a failed test's message contains the rclone command, secret key
 included, and CI would print it to this public repo's Actions log.
 
-Dokploy sends no notification when a backup fails yet (no notification channel is set up in Dokploy).
-Check the Backups tab after a change.
+## When a backup fails
+
+Dokploy emails `ops@`, which only the infra admins read: its email notification has **Database
+Backup** on. It sends one for every backup, failed or not. The notification is set up by hand in
+Dokploy (Settings → Notifications), not in OpenTofu yet: **after a fresh Dokploy install, set it up
+again**, with Database Backup on.
+
+**A failure email contains the destination's secret key.** Dokploy v0.30.8 puts the failed command in
+the error it sends, and the command has the key in it. Anyone with that email can read and delete
+every dump. A failed **Run Manual Backup** shows the same error on screen. So a failure email means
+rotating the credential, whatever failed:
+
+1. In a PR, change `description` in `glesys_objectstorage_credential.database_backups`
+   (`terraform/glesys/main.tf`), e.g. add the date. A changed description makes a new credential: on
+   merge, `glesys-apply` deletes the old one and creates its replacement, then `dokploy-apply` gives
+   the destination the new key.
+2. Dokploy: the project → **production** → its Postgres → **Backups** → **Run Manual Backup**, to
+   check the new key.
+3. Delete the email. Its key no longer works.
+
+Then fix what failed: the email names the project and the database.
+
+v0.30.8 also writes the key to Dokploy's own log (`docker service logs dokploy`) on every backup,
+failed or not. Only the host's admins can read that log, and they can read the key in Dokploy anyway.
+Dokploy has fixed both on its `canary` branch ([#5733](https://github.com/Dokploy/dokploy/pull/5733),
+[#5527](https://github.com/Dokploy/dokploy/pull/5527)), not yet in a release
+(v0.30.10 still has them). Once production runs one that has them, a failure email no longer needs a
+rotation.
 
 ## Check that they run
 
@@ -113,9 +139,13 @@ unset S3_KEY S3_SECRET
   folder isn't pruned any more: delete it by hand once it's no longer needed.
 - Removing a project's Postgres in `deployments` is refused by the plan (`prevent_destroy`), so its
   backups don't stop by accident.
+- Renaming or deleting the destination stops every project's deploys, not only the backups:
+  `deployments` looks `database-backups` up by name in every plan with a production Postgres.
 - One project's schedule or retention: its `project.yaml`. The defaults for every project:
   `databases.tf` in `deployments`.
 
 **Tested** on 2026-10-25, against a local copy of the platform (rclone's S3 server standing in for
 GleSYS): Test Connection, a scheduled run and a manual one, retention, a restore with Dokploy after
 dropping a table, and the manual restore into a new, empty Postgres. Both restores gave back every row.
+On 2026-10-28, the same way: the daily default, and a failed backup's email to a local mail server
+standing in for `ops@`. The email had the key in it.

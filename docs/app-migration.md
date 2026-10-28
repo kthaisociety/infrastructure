@@ -188,7 +188,7 @@ environments:
   pipeline generates their credentials into OpenBao; nobody writes them. The app gets `DATABASE_URL`,
   `PGHOST`, `REDIS_URL`, … only for the names listed in `secrets` (`docs/project-yaml.md` lists them per
   engine). The database and user are the project name with `_` for `-` (`my_app`). Production's
-  Postgres is backed up every five days with nothing to add; `backups:` under `postgres` changes when
+  Postgres is backed up every day with nothing to add; `backups:` under `postgres` changes when
   and how many ([database-backups.md](database-backups.md)).
 - **Volumes** (`volumes: { /data: data }`): only if the app keeps files; avoid.
 - **Production's real domain is not in this PR**: the old app still serves that host, and two Traefik
