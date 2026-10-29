@@ -17,11 +17,13 @@ Dokploy projects and the images they run) are in
 - [docs/plan.md](docs/plan.md): the platform's plan (OpenBao, state, disaster recovery);
   [docs/openbao-deploy.md](docs/openbao-deploy.md): how OpenBao was deployed;
   [docs/openbao-recovery.md](docs/openbao-recovery.md): root token or CI login trouble.
+- [docs/database-backups.md](docs/database-backups.md): the production databases' scheduled backups, and
+  how to restore one.
 
 | Path | What | Status |
 |---|---|---|
 | `terraform/glesys/` | Object storage instances, credentials and buckets (state, OpenBao snapshots, backups) | Applied |
-| `terraform/dokploy/` | OpenBao on Dokploy (`bao.kthais.com`), later its snapshots and Dokploy core settings | Applied (OpenBao) |
+| `terraform/dokploy/` | OpenBao on Dokploy (`bao.kthais.com`), Dokploy's database backups destination, later OpenBao's snapshots and Dokploy's other core settings | Applied (OpenBao) |
 | `terraform/openbao/` | OpenBao config: KV mount, GitHub and Google logins, token roles, policies, `deployments-ci` | Applied |
 | `terraform/openbao/projects.yaml` | Every project's OpenBao side, one line each (`my-app: {}`): its policies and empty secret paths | `onboarding-service` |
 | `terraform/modules/project-secrets/` | One project environment's policy, empty path (and, for now, a provider token) | Applied |

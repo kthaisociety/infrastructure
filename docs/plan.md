@@ -124,6 +124,7 @@ in the foundation depends on GCP, so there's no GCP project, billing account or 
   | tfstate (`os-eea34`) | CI: OpenTofu state, bucket `kthais-tfstate` |
   | `openbao-snapshots` (new) | OpenBao's snapshot job |
   | `website-psql-backups` (`os-8d2b7`) | Dokploy: backups of the website's Postgres |
+  | `database-backups` (new) | Dokploy: backups of the production Postgres databases `deployments` creates ([database-backups.md](database-backups.md)) |
   | `mattermost-backups` (`os-a273a`) | Mattermost's own backups |
   | `mattermost-file-storage` (`os-558b4`) | Mattermost's live file uploads (production data) |
 
@@ -151,8 +152,9 @@ in the foundation depends on GCP, so there's no GCP project, billing account or 
   with `-lock=false`. Never apply from a laptop.
 - **Versioning** is enabled on the state bucket (tested 2026-09-30), so a bad or overwritten state can be
   restored from an earlier version.
-- **App backups:** Dokploy's backup destination is `website-psql-backups`; new projects' backups go
-  there too, or get their own instance.
+- **App backups:** the website's Postgres keeps its destination, `website-psql-backups`. Projects on the
+  pipeline get theirs from `deployments`, to the `database-backups` instance (IT-18,
+  [database-backups.md](database-backups.md)).
 
 `terraform/glesys/versions.tf` is the reference backend and encryption block; every root module copies
 it with its own `key`.
