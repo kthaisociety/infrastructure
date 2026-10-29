@@ -298,10 +298,10 @@ No GHCR pull account: images are public (see "Builds").
    custom roles can grant exactly that, but need a paid license. So it's an admin: the split between the
    repos still protects OpenBao's configuration (`deployments-ci` only mints provider tokens), not
    Dokploy's settings or the `infrastructure` project. The gates in front of each repo's apply differ:
-   - `infrastructure` `main`: PRs only, required checks (`title`, `changes`, `fmt`, `openbao-validate`,
-     `Greptile Review`), no code-owner approval required; org admins bypass.
+   - `infrastructure` `main`: PRs only, required checks (`title`, `changes`, `fmt`, `openbao-validate`)
+     and a code owner's approval; org admins bypass.
    - `deployments` `main`: required checks nobody bypasses (`title`, `check`, `bot-scope`), and a
-     separate rule requiring a code owner's approval (plus `Greptile Review` and resolved threads),
+     separate rule requiring a code owner's approval (plus resolved threads),
      which `kthais-deploy` and org admins bypass. `kthais-deploy`'s PRs are limited to one
      `release.yaml` by `bot-scope`.
    Revisit with a custom role if the license ever comes.

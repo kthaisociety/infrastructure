@@ -52,7 +52,7 @@ no OAuth, no client secret.
 | Permissions | Contents, Pull requests: read and write (Metadata: read) |
 | Installed on | `deployments` only |
 | Used by | `deployments`' own `deploy.yml`, to open and merge the `release.yaml` PRs [step 12] |
-| Ruleset | the only bypass of `deployments`' "main: human review" ruleset (approval, code owners, threads, Greptile). Never of "main: checks (no bypass)" |
+| Ruleset | the only bypass of `deployments`' "main: human review" ruleset (approval, code owners, threads). Never of "main: checks (no bypass)" |
 | Secrets | repo secrets in `deployments`: `DEPLOY_APP_CLIENT_ID`, `DEPLOY_APP_PRIVATE_KEY`. Never org secrets |
 | If the key leaks | anyone with it can open and merge PRs in `deployments` without human review, still only passing every required check (`bot-scope` limits bot PRs to `projects/*/release.yaml`). Rotate at once. |
 | If it stops working | automatic deploys stop at the PR step |

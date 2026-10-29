@@ -67,7 +67,8 @@ In order. Each step says what "done" looks like.
   the title check), delete branches after merge.
 - **Ruleset on `main`:** no deletion or force-push, linear history, signed commits, PRs only, squash
   only, all conversations resolved, code-owner review, required checks: `title / PR title is a
-  Conventional Commit`, the tests, `Greptile Review`. (onboarding-service: only the first four so far.)
+  Conventional Commit` and the tests. Greptile isn't required: tag `@greptileai review this PR` on a PR
+  that wants a second look.
 - **Add the repo to the bots' scope** (nothing is "all repositories", on purpose):
   - `kthais-release`: org → Settings → GitHub Apps → `kthais-release` → Configure → add the repo; then add
     it to the org secrets' repository access:
@@ -166,7 +167,7 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 ## 3. Day to day
 
 ### 3.1 A change, to staging
-- PR in the app repo (title, tests, Greptile) → squash merge → `build` pushes `sha-<7>` → `deploy-staging`
+- PR in the app repo (title, tests, code-owner review) → squash merge → `build` pushes `sha-<7>` → `deploy-staging`
   asks `deploy.yml`, which checks the digest, commits the `staging:` line, applies, and reports back. The
   build is green only once staging runs the image.
 
@@ -198,7 +199,6 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 | Symptom | Look at | Likely cause → fix |
 |---|---|---|
 | PR blocked, `title` red | the PR's checks | title isn't a Conventional Commit → edit the title |
-| PR blocked, `Greptile Review` missing | the PR | Greptile didn't run → comment `@greptileai review this PR` |
 | PR can't merge, all green | the PR | unresolved conversations, or (where required) no code-owner approval |
 | `build` red | its run | tests, or the image push |
 | No release PR, or release PR without checks | `release` run | no `feat:`/`fix:`/`Release-As:` yet; or `kthais-release` not installed on the repo / secrets not visible to it |
