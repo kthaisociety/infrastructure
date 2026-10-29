@@ -127,6 +127,7 @@ in the foundation depends on GCP, so there's no GCP project, billing account or 
   | `database-backups` (new) | Dokploy: backups of the production Postgres databases `deployments` creates ([database-backups.md](database-backups.md)) |
   | `mattermost-backups` (`os-a273a`) | Mattermost's own backups |
   | `mattermost-file-storage` (`os-558b4`) | Mattermost's live file uploads (production data) |
+  | `<project>-<env>` (one per environment of a project with `storage: true`) | That app's files, in the bucket `kthais-<project>-<env>` ([app-delivery.md](app-delivery.md) 2.7) |
 
   A leaked key for one instance can't touch the others. All are imported into `terraform/glesys` and
   `prevent_destroy`; consumers keep their existing credentials, which GleSYS can't import.
@@ -135,7 +136,10 @@ in the foundation depends on GCP, so there's no GCP project, billing account or 
   imported; credentials can't, so existing ones get replaced by OpenTofu-managed ones and then deleted.
   Credential secret keys end up in state; state is encrypted.
 - **Buckets** aren't in the GleSYS API. The state bucket is created by hand (it must exist before
-  `tofu init`); the snapshot job creates its own bucket if missing; the backups bucket exists.
+  `tofu init`); the snapshot job creates its own bucket if missing; the backups bucket exists. Apps'
+  buckets are created through the S3 API by the `aminueza/minio` provider, one configuration per
+  instance, with that instance's credential (`terraform/glesys/storage.tf`). Bucket names are global
+  across GleSYS.
 - **Chicken-and-egg:** `terraform/glesys` stores its state in the `tfstate` instance it manages. Create
   that instance, the `kthais-tfstate` bucket and CI's credential by hand in the GleSYS UI, then import
   the instance. CI's credential stays hand-made: OpenTofu managing the key it runs with would be

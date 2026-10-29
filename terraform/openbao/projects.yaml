@@ -9,8 +9,11 @@
 # read, and deployments' CI may mint tokens with them.
 #
 # Adding a project is one line:   my-app: {}
-# Defaults: environments [staging, production]. Optional key:
+# Defaults: environments [staging, production]. Optional keys:
 #   environments: [...]   # environment names: lowercase letters and digits only
+#   storage: true         # object storage: per environment, its own GleSYS instance and the bucket
+#                         # kthais-<project>-<env>, credentials at secret/<project>/<env>/storage
+#                         # (terraform/glesys/storage.tf). Can't be removed by deleting the line.
 #
 # Every project reads the shared store of its environment, secret/shared/<env>; nothing to add here for it.
 

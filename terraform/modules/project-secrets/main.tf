@@ -34,6 +34,13 @@ resource "vault_policy" "this" {
       path "${var.mount}/metadata/${local.path}/database/*" {
         capabilities = ["read", "list"]
       }
+      # Its object storage credential, when it has storage (terraform/openbao/storage.tf).
+      path "${var.mount}/data/${local.path}/storage" {
+        capabilities = ["read"]
+      }
+      path "${var.mount}/metadata/${local.path}/storage" {
+        capabilities = ["read", "list"]
+      }
       # Dokploy's connection test. The token has no default policy, so it gets only this from it.
       path "auth/token/lookup-self" {
         capabilities = ["read"]

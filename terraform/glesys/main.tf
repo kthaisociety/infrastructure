@@ -2,7 +2,7 @@
 # its own instance: a leaked key for one can't touch the others.
 #
 # Buckets and consumers' credentials aren't managed here unless noted: buckets aren't in the GleSYS
-# API, and existing credentials can't be imported.
+# API, and existing credentials can't be imported. Apps' storage, buckets included, is in storage.tf.
 #
 # Every instance is prevent_destroy: they hold state, backups and live data.
 

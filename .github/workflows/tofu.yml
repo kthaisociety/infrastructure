@@ -239,6 +239,11 @@ jobs:
             while IFS= read -r e; do
               grep -qxE '[a-z0-9]+' <<<"$e" || { echo "::error file=terraform/openbao/projects.yaml::$p: environment '$e': lowercase letters and digits only"; ok=false; }
             done < <(P="$p" yq -r '.[strenv(P)].environments // ["staging", "production"] | .[]' projects.yaml)
+            # Anything else would be read as no storage (terraform/glesys/storage.tf), without a word.
+            if [ "$(P="$p" yq -r '.[strenv(P)] | has("storage")' projects.yaml)" = true ] &&
+              [ "$(P="$p" yq -r '.[strenv(P)] | ((.storage == true) and ((.storage | tag) == "!!bool"))' projects.yaml)" != true ]; then
+              echo "::error file=terraform/openbao/projects.yaml::$p: storage is true, or left out"; ok=false
+            fi
           done < <(yq -r 'keys | .[]' projects.yaml)
           $ok
       # CI's OpenBao login (openbao-apply) is only ever tried on main, so check here that the repo part of

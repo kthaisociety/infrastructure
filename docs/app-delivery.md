@@ -1,6 +1,6 @@
 # App delivery: from a push to running on Dokploy
 
-_Updated 2026-10-17. The design and its reasons are in [delivery-plan.md](delivery-plan.md); this is the
+_Updated 2026-10-29. The design and its reasons are in [delivery-plan.md](delivery-plan.md); this is the
 guide to using it. Each part says whether it's **built** or **not yet**: treat anything "not yet" as
 intended, not as fact._
 
@@ -93,7 +93,7 @@ In order. Each step says what "done" looks like.
 
 ### 2.2 Its OpenBao side, in `infrastructure`
 - One line in `terraform/openbao/projects.yaml`: `my-app: {}` (staging and production), or
-  `my-app: { environments: [...] }` for others.
+  `my-app: { environments: [...] }` for others. Add `storage: true` for object storage (2.7).
 - PR, plan, merge. Creates per environment the policy `dokploy-project-<project>-<env>` and the empty path
   `secret/<project>/<env>`. The policy also reads the environment's shared store, `secret/shared/<env>`.
   It also lets `deployments`' CI write `secret/<project>/<env>/database/*`, where it puts the credentials
@@ -148,14 +148,33 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 - The app gets a setting only by listing its name in `secrets` (`DATABASE_URL`, `PGHOST`, `REDIS_URL`, …).
   The list per engine is in `deployments`' `docs/project-yaml.md`. Nobody writes these values by hand.
 
-### 2.7 First deploy, to staging
+### 2.7 Object storage
+- `storage: true` on the project's line in `terraform/openbao/projects.yaml`, e.g.
+  `my-app: { storage: true }`. PR, plan, merge.
+- Creates, per environment, its own GleSYS instance `<project>-<env>` with a credential, and the bucket
+  `kthais-<project>-<env>` in it (`terraform/glesys/storage.tf`). One instance per environment because a
+  credential reaches every bucket of its instance: staging's key can't touch production's files. Bucket
+  names are global across all of GleSYS, hence the prefix.
+- `terraform/openbao` writes the credential, endpoint, region and bucket name to
+  `secret/<project>/<env>/storage`. People can only read it.
+- The app lists the names it reads in `project.yaml`'s `secrets`: `S3_ACCESS_KEY_ID`,
+  `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET` (`deployments`' guide), and passes them
+  to its S3 client. Merge this first: until the storage exists, a deploy that lists them fails resolving
+  them.
+- **Removing it** isn't deleting the line: the instance, credential and bucket are `prevent_destroy`, so
+  the plan fails. It's a PR of its own, with `removed` blocks, once the files are dealt with.
+- **Rotating a credential** isn't built yet: it takes replacing
+  `glesys_objectstorage_credential.storage["<project>/<env>"]`, after which the next apply writes the new
+  one to OpenBao and the app needs a redeploy. Ask Platform.
+
+### 2.8 First deploy, to staging
 - The next build of `main` deploys it (or re-run the last `build` run). `deploy.yml` writes `release.yaml`'s
   `staging:` line, and the app switches from the placeholder to the image, volumes already attached.
   By hand instead: Actions → deploy → Run workflow in `deployments`.
 - **Done when:** the deploy succeeds (every `${{vault…}}` reference resolved; a missing key fails the
   deploy), the app logs look right, and it answers on `http://<app name>:<port>` from `dokploy-network`.
 
-### 2.8 First release, to production
+### 2.9 First release, to production
 - release-please only opens a release PR after a `feat:` or `fix:`, or a commit with a `Release-As:`
   footer. For a chosen first version, squash-merge any PR with this in the commit message:
   ```
@@ -221,7 +240,8 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
   lowercase letters and digits only (names join as `<project>-<env>`, split at the last hyphen).
 - OpenBao: policy `dokploy-project-<project>-<env>`, path `secret/<project>/<env>`, shared
   `secret/shared/<env>`, database credentials `secret/<project>/<env>/database/<engine>` (written by
-  `deployments`' CI).
+  `deployments`' CI), object storage `secret/<project>/<env>/storage` (written by this repo).
+- GleSYS, for a project with storage: instance `<project>-<env>`, bucket `kthais-<project>-<env>`.
 - Dokploy: project `<project>`, vault provider `<project>-<env>`, app internal name
   `<project>-<env>-<6 random>` (Dokploy picks the suffix; the apply output `projects` shows it), volume
   `<project>-<env>-<name>`.
@@ -251,7 +271,8 @@ environments:
       my-app.kthais.com: { port: 8000 }
 ```
 
-Not supported yet: build arguments, object storage (IT-39).
+Object storage isn't in `project.yaml`: `storage: true` in this repo's `projects.yaml` (2.7), then its names
+in `secrets`. Not supported yet: build arguments.
 
 ### 6.3 `release.yaml` (in `deployments`)
 ```yaml
