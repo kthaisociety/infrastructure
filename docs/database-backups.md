@@ -12,6 +12,7 @@ to restore.
 | When | Every day at 00:00 UTC (Dokploy's clock, `0 0 * * *`), unless the project sets its own `schedule` |
 | Kept | The last 30 dumps of each database (a month, at the default schedule), unless the project sets its own `keep` (at least 7) |
 | Where | GleSYS instance `database-backups`, bucket `kthais-database-backups`, `<app_name>/<timestamp>.sql.gz` |
+| Locked | Each dump for 14 days after it's written (Object Lock, Compliance mode): nobody can delete it before then, us included |
 
 A project changes when and how many in its `project.yaml`, under `databases.postgres.backups`
 (`deployments`' `docs/project-yaml.md`). It can't turn backups off.
@@ -29,9 +30,52 @@ A project changes when and how many in its `project.yaml`, under `databases.post
 | `terraform/dokploy/core.tf` | Dokploy's destination `database-backups`: the bucket, with that credential |
 | `deployments`: `terraform/modules/project/databases.tf` | Per production Postgres, a backup to the destination it looks up by name, with the default schedule and retention, or the project's |
 
-The bucket is made by hand: buckets aren't in the GleSYS API, and rclone (which Dokploy uploads with)
-is told not to create one. On a new instance, make it before the first backup runs: GleSYS UI → Object
-Storage → `database-backups` → create bucket `kthais-database-backups`.
+### The bucket
+
+Made by hand, once, before the first backup runs: buckets aren't in the GleSYS API, rclone (which
+Dokploy uploads with) is told not to create one, and Object Lock can only be turned on when a bucket is
+created. It's made with the S3 API, with:
+
+- **Object Lock, Compliance mode, 14 days.** Every dump is locked for 14 days after it's written.
+  Nobody can delete it or shorten its lock, not even with a key to the instance, such as the one
+  Dokploy holds. So a leaked Dokploy key, or whoever gets the host, can't destroy the last two weeks of
+  backups.
+- **A lifecycle rule.** Object Lock turns versioning on, so Dokploy's own deletes (`keep`) only hide a
+  dump behind a delete marker. The rule removes such a dump once its lock has run out (GleSYS runs
+  these rules nightly), the markers left behind, and uploads that never finished.
+
+It needs Docker, and a credential for the `database-backups` instance: in the GleSYS UI, make a
+temporary one on that instance, and delete it when done. The key is read from stdin, so it's never on a
+command line:
+
+```sh
+read -r  S3_KEY       # the credential's access key
+read -rs S3_SECRET    # its secret key, not echoed
+s3api() {
+  printf '%s\n%s\n' "$S3_KEY" "$S3_SECRET" | docker run --rm -i --entrypoint sh \
+    amazon/aws-cli:2.38.1 -c '
+    read -r AWS_ACCESS_KEY_ID; read -r AWS_SECRET_ACCESS_KEY
+    export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION=us-east-1
+    aws --endpoint-url https://objects.dc-sto1.glesys.net s3api "$@"' s3api "$@"
+}
+B=kthais-database-backups
+s3api create-bucket --bucket $B --object-lock-enabled-for-bucket
+s3api put-object-lock-configuration --bucket $B --object-lock-configuration \
+  '{"ObjectLockEnabled": "Enabled", "Rule": {"DefaultRetention": {"Mode": "COMPLIANCE", "Days": 14}}}'
+s3api put-bucket-lifecycle-configuration --bucket $B --lifecycle-configuration '{"Rules": [{
+  "ID": "dumps-dokploy-deleted", "Status": "Enabled", "Filter": {"Prefix": ""},
+  "NoncurrentVersionExpiration": {"NoncurrentDays": 1},
+  "Expiration": {"ExpiredObjectDeleteMarker": true},
+  "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1}}]}'
+s3api get-object-lock-configuration --bucket $B        # COMPLIANCE, 14 days
+s3api get-bucket-lifecycle-configuration --bucket $B   # the rule
+unset S3_KEY S3_SECRET
+```
+
+The 14 days can be changed later with the same `put-object-lock-configuration`, but only for dumps
+written after it: a dump keeps the lock it got.
+
+### The destination
 
 After `terraform/dokploy` creates or changes the destination, test it in Dokploy: Settings → S3
 Destinations → `database-backups` → **Test Connection**. Not in OpenTofu: the provider can test it at
@@ -143,9 +187,24 @@ unset S3_KEY S3_SECRET
   `deployments` looks `database-backups` up by name in every plan with a production Postgres.
 - One project's schedule or retention: its `project.yaml`. The defaults for every project:
   `databases.tf` in `deployments`.
+- **A dump deleted within its 14 days isn't gone**, whether Dokploy deleted it or someone with the key
+  did. With the `s3api` helper above (`B=kthais-database-backups`),
+  `s3api list-object-versions --bucket $B --prefix <app_name>/` shows it under a delete marker, and
+  deleting the marker brings it back:
+  `s3api delete-object --bucket $B --key <key> --version-id <the marker's VersionId>`.
+- Nobody can delete a dump within its 14 days, not even for a GDPR erasure request: those dumps have to
+  age out. That was agreed on IT-18.
 
 **Tested** on 2026-10-25, against a local copy of the platform (rclone's S3 server standing in for
 GleSYS): Test Connection, a scheduled run and a manual one, retention, a restore with Dokploy after
 dropping a table, and the manual restore into a new, empty Postgres. Both restores gave back every row.
 On 2026-10-28, the same way: the daily default, and a failed backup's email to a local mail server
-standing in for `ops@`. The email had the key in it.
+standing in for `ops@`. The email had the key in it. On 2026-10-29, on a GleSYS test instance with a
+bucket made as above, locked for 1 day:
+- The bucket's own key couldn't delete a locked dump, even with `--bypass-governance-retention`, and
+  couldn't shorten its lock or switch it to Governance mode.
+- The local Dokploy backed up to that bucket with `keep: 2` (11.6 MB dumps, so multipart uploads): every
+  dump was locked, and its delete of the oldest left a delete marker. Restoring the newest gave back
+  every row. Deleting the marker brought the deleted dump back.
+- The lifecycle rule was accepted. That GleSYS runs it can only be seen once the locks expire: checked
+  on 2026-10-31.
