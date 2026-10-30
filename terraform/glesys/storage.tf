@@ -8,8 +8,9 @@
 # configuration per instance, with a credential of OpenTofu's own. Not the app's, which would leave the
 # provider without a key while the app's is being replaced. Not the instance's default one either: the
 # GleSYS provider (0.18.0) refreshes the instance's accesskey from whichever credential the API lists
-# first, keeping the old secretkey (tested 2026-10-30). Bucket names are global across all of GleSYS
-# (tested 2026-10-29: `test` and `uploads` are taken), hence kthais-<project>-<env>[-<bucket>].
+# first, keeping the old secretkey (tested 2026-10-30; glesys/terraform-provider-glesys#293). Once that's
+# fixed, the instance's own credential could replace OpenTofu's. Bucket names are global across all of
+# GleSYS (tested 2026-10-29: `test` and `uploads` are taken), hence kthais-<project>-<env>[-<bucket>].
 #
 # prevent_destroy on the instance and the buckets: they hold an app's live files. Removing `storage` from
 # a project, or a bucket from its list, fails the plan, and so would dropping an instance's provider
