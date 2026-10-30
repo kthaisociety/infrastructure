@@ -6,6 +6,17 @@ terraform {
       source  = "glesys/glesys"
       version = "~> 0.18.0"
     }
+    # Only for the apps' buckets (storage.tf): it works with GleSYS's S3 API, and plans with a credential
+    # created in the same run. hashicorp/aws does neither (tested 2026-10-29).
+    minio = {
+      source  = "aminueza/minio"
+      version = "~> 3.45.0"
+    }
+    # Only for waiting until a new credential works (storage.tf).
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.13.0"
+    }
   }
 
   # The tfstate instance and this bucket are created by hand once (see main.tf). Credentials come from

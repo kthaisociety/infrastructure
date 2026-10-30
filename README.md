@@ -22,7 +22,7 @@ Dokploy projects and the images they run) are in
 
 | Path | What | Status |
 |---|---|---|
-| `terraform/glesys/` | Object storage instances, credentials and buckets (state, OpenBao snapshots, backups) | Applied |
+| `terraform/glesys/` | Object storage instances, credentials and buckets (state, OpenBao snapshots, backups, apps' storage) | Applied |
 | `terraform/dokploy/` | OpenBao on Dokploy (`bao.kthais.com`), Dokploy's database backups destination, later OpenBao's snapshots and Dokploy's other core settings | Applied (OpenBao) |
 | `terraform/openbao/` | OpenBao config: KV mount, GitHub and Google logins, token roles, policies, `deployments-ci` | Applied |
 | `terraform/openbao/projects.yaml` | Every project's OpenBao side, one line each (`my-app: {}`): its policies and empty secret paths | `onboarding-service` |

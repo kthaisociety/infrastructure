@@ -239,6 +239,16 @@ jobs:
             while IFS= read -r e; do
               grep -qxE '[a-z0-9]+' <<<"$e" || { echo "::error file=terraform/openbao/projects.yaml::$p: environment '$e': lowercase letters and digits only"; ok=false; }
             done < <(P="$p" yq -r '.[strenv(P)].environments // ["staging", "production"] | .[]' projects.yaml)
+            # `storage` is {} or {buckets: [...]}: anything else would be misread (terraform/glesys/storage.tf).
+            # `[...] | all`, not `and`: yq's `and` gets `keys` on its right side wrong.
+            if [ "$(P="$p" yq -r '.[strenv(P)] | has("storage")' projects.yaml)" = true ]; then
+              if [ "$(P="$p" yq -r '.[strenv(P)].storage | [tag == "!!map", ((keys | map(select(. != "buckets")) | length) == 0)] | all' projects.yaml 2>/dev/null)" != true ]; then
+                echo "::error file=terraform/openbao/projects.yaml::$p: storage is {} (one bucket) or {buckets: [...]}, or left out"; ok=false
+              elif [ "$(P="$p" yq -r '.[strenv(P)].storage | has("buckets")' projects.yaml)" = true ] &&
+                [ "$(P="$p" yq -r '.[strenv(P)].storage.buckets | [tag == "!!seq", length > 0, ([.[] | select(tag != "!!str" or (test("^[a-z0-9]+(-[a-z0-9]+)*$") | not))] | length) == 0, (unique | length) == length] | all' projects.yaml 2>/dev/null)" != true ]; then
+                echo "::error file=terraform/openbao/projects.yaml::$p: storage.buckets is a non-empty list of distinct names: lowercase letters, digits and single hyphens"; ok=false
+              fi
+            fi
           done < <(yq -r 'keys | .[]' projects.yaml)
           $ok
       # CI's OpenBao login (openbao-apply) is only ever tried on main, so check here that the repo part of
