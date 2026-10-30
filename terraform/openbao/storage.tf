@@ -1,5 +1,5 @@
-# Apps' object storage (IT-39): terraform/glesys (storage.tf) makes an instance, a credential and a bucket
-# per environment of every project with `storage: true` in projects.yaml. This writes each to
+# Apps' object storage (IT-39): terraform/glesys (storage.tf) makes an instance, a credential and buckets
+# per environment of every project with `storage` in projects.yaml. This writes each to
 # secret/<project>/<env>/storage, under the names the app lists in its project.yaml's secrets. Its own
 # path, not secret/<project>/<env>: a KV v2 write replaces the whole secret, so writing there would wipe
 # what people filled in. The project's policy reads it (modules/project-secrets); people only read it
@@ -9,20 +9,20 @@ locals {
   # "<project>/<env>" => its storage, from terraform/glesys's output (snapshots.tf reads that state).
   # glesys-apply runs before this root, so a project that just asked for storage is already there.
   storage = {
-    for k, s in data.terraform_remote_state.glesys.outputs.storage : k => jsonencode({
+    # The buckets are S3_BUCKET, or S3_BUCKET_<NAME> for each one in the project's list.
+    for k, s in data.terraform_remote_state.glesys.outputs.storage : k => jsonencode(merge({
       S3_ACCESS_KEY_ID     = s.access_key
       S3_SECRET_ACCESS_KEY = s.secret_key
       S3_ENDPOINT          = s.endpoint
       S3_REGION            = s.region
-      S3_BUCKET            = s.bucket
-    })
+    }, s.buckets))
   }
 
   # For main.tf's infra-admin policy: read-only, like the database paths.
   storage_paths = flatten([
     for p, cfg in local.projects : [
       for env in try(cfg.environments, ["staging", "production"]) : "${p}/${env}/storage"
-    ] if try(cfg.storage, false) == true
+    ] if try(cfg.storage, null) != null
   ])
 }
 

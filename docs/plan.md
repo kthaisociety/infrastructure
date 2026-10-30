@@ -127,7 +127,7 @@ in the foundation depends on GCP, so there's no GCP project, billing account or 
   | `database-backups` (new) | Dokploy: backups of the production Postgres databases `deployments` creates ([database-backups.md](database-backups.md)) |
   | `mattermost-backups` (`os-a273a`) | Mattermost's own backups |
   | `mattermost-file-storage` (`os-558b4`) | Mattermost's live file uploads (production data) |
-  | `<project>-<env>` (one per environment of a project with `storage: true`) | That app's files, in the bucket `kthais-<project>-<env>` ([app-delivery.md](app-delivery.md) 2.7) |
+  | `<project>-<env>` (one per environment of a project with `storage`) | That app's files, in the bucket `kthais-<project>-<env>`, or one per name in its `buckets` list ([app-delivery.md](app-delivery.md) 2.7) |
 
   A leaked key for one instance can't touch the others. All are imported into `terraform/glesys` and
   `prevent_destroy`; consumers keep their existing credentials, which GleSYS can't import.

@@ -1,6 +1,6 @@
-# Object storage for apps (IT-39): every project with `storage: true` in terraform/openbao/projects.yaml
-# gets, per environment, its own instance, a credential for the app and a bucket. One instance per
-# project and environment, since a credential reaches every bucket of its instance: staging's key can't
+# Object storage for apps (IT-39): every project with `storage` in terraform/openbao/projects.yaml gets,
+# per environment, its own instance, a credential for the app and its buckets. One instance per project
+# and environment, since a credential reaches every bucket of its instance: staging's key can't
 # touch production's files. terraform/openbao (storage.tf) writes the app's credential to
 # secret/<project>/<env>/storage, where the app reads it.
 #
@@ -9,26 +9,33 @@
 # provider without a key while the app's is being replaced. Not the instance's default one either: the
 # GleSYS provider (0.18.0) refreshes the instance's accesskey from whichever credential the API lists
 # first, keeping the old secretkey (tested 2026-10-30). Bucket names are global across all of GleSYS
-# (tested 2026-10-29: `test` and `uploads` are taken), hence kthais-<project>-<env>.
+# (tested 2026-10-29: `test` and `uploads` are taken), hence kthais-<project>-<env>[-<bucket>].
 #
-# prevent_destroy on the instance and the bucket: they hold an app's live files. Removing `storage` from
-# a project fails the plan, and so does dropping its provider configuration while the bucket is still in
-# state (OpenTofu warns about this on every plan). Removing storage is a deliberate PR of its own, with
-# `removed` blocks.
+# prevent_destroy on the instance and the buckets: they hold an app's live files. Removing `storage` from
+# a project, or a bucket from its list, fails the plan, and so would dropping an instance's provider
+# configuration while its buckets are still in state. Removing either is a deliberate PR of its own, with
+# `removed` blocks. Adding a bucket to the list is just that.
 
 locals {
   projects = yamldecode(file("${path.module}/../openbao/projects.yaml"))
 
-  # "<project>/<env>" => names, for every environment of every project that asks for storage. The
-  # environments default as in terraform/openbao/projects.tf.
+  # "<project>/<env>" => its instance's name and its buckets (secret name => bucket name), for every
+  # environment of every project with storage. The environments default as in
+  # terraform/openbao/projects.tf. `storage: {}` is one bucket, S3_BUCKET; `storage: {buckets: [...]}`
+  # one per name, S3_BUCKET_<NAME> (`user-uploads` gives S3_BUCKET_USER_UPLOADS), and no S3_BUCKET.
   storage = merge([
     for p, cfg in local.projects : {
       for env in try(cfg.environments, ["staging", "production"]) : "${p}/${env}" => {
-        name   = "${p}-${env}"
-        bucket = "kthais-${p}-${env}"
+        name = "${p}-${env}"
+        buckets = try(cfg.storage.buckets, null) == null ? tomap({ S3_BUCKET = "kthais-${p}-${env}" }) : {
+          for b in cfg.storage.buckets : "S3_BUCKET_${upper(replace(b, "-", "_"))}" => "kthais-${p}-${env}-${b}"
+        }
       }
-    } if try(cfg.storage, false) == true
+    } if try(cfg.storage, null) != null
   ]...)
+
+  # Bucket name => its instance's key in local.storage.
+  storage_buckets = merge([for k, s in local.storage : { for b in values(s.buckets) : b => k }]...)
 
   storage_endpoint = "objects.${var.datacenter}.glesys.net"
 }
@@ -78,9 +85,9 @@ provider "minio" {
 }
 
 resource "minio_s3_bucket" "storage" {
-  for_each = local.storage
-  provider = minio.storage[each.key]
-  bucket   = each.value.bucket
+  for_each = local.storage_buckets
+  provider = minio.storage[each.value]
+  bucket   = each.key
 
   depends_on = [time_sleep.storage_buckets_credential]
 
@@ -89,8 +96,8 @@ resource "minio_s3_bucket" "storage" {
 
     # S3's rule; the rest of a bucket name's rules hold for any project and environment name.
     precondition {
-      condition     = length(each.value.bucket) <= 63
-      error_message = "Bucket ${each.value.bucket} is longer than 63 characters: shorten the project name."
+      condition     = length(each.key) <= 63
+      error_message = "Bucket ${each.key} is longer than 63 characters: shorten the project or bucket name."
     }
   }
 }
