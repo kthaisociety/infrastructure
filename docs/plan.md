@@ -138,8 +138,8 @@ in the foundation depends on GCP, so there's no GCP project, billing account or 
 - **Buckets** aren't in the GleSYS API. The state bucket is created by hand (it must exist before
   `tofu init`); the snapshot job creates its own bucket if missing; the backups bucket exists. Apps'
   buckets are created through the S3 API by the `aminueza/minio` provider, one configuration per
-  instance, with that instance's credential (`terraform/glesys/storage.tf`). Bucket names are global
-  across GleSYS.
+  instance, with a credential of OpenTofu's own in that instance (`terraform/glesys/storage.tf`). Bucket
+  names are global across GleSYS.
 - **Chicken-and-egg:** `terraform/glesys` stores its state in the `tfstate` instance it manages. Create
   that instance, the `kthais-tfstate` bucket and CI's credential by hand in the GleSYS UI, then import
   the instance. CI's credential stays hand-made: OpenTofu managing the key it runs with would be

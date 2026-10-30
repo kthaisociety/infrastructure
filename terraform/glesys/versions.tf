@@ -12,6 +12,11 @@ terraform {
       source  = "aminueza/minio"
       version = "~> 3.45.0"
     }
+    # Only for waiting until a new credential works (storage.tf).
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.13.0"
+    }
   }
 
   # The tfstate instance and this bucket are created by hand once (see main.tf). Credentials come from

@@ -151,21 +151,23 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
 ### 2.7 Object storage
 - `storage: true` on the project's line in `terraform/openbao/projects.yaml`, e.g.
   `my-app: { storage: true }`. PR, plan, merge.
-- Creates, per environment, its own GleSYS instance `<project>-<env>` with a credential, and the bucket
-  `kthais-<project>-<env>` in it (`terraform/glesys/storage.tf`). One instance per environment because a
-  credential reaches every bucket of its instance: staging's key can't touch production's files. Bucket
-  names are global across all of GleSYS, hence the prefix.
+- Creates, per environment, its own GleSYS instance `<project>-<env>` with a credential for the app, and
+  the bucket `kthais-<project>-<env>` in it (`terraform/glesys/storage.tf`; OpenTofu creates the bucket
+  with a credential of its own in the instance). One instance per environment because a credential
+  reaches every bucket of its instance: staging's key can't touch production's files. Bucket names are
+  global across all of GleSYS, hence the prefix.
 - `terraform/openbao` writes the credential, endpoint, region and bucket name to
   `secret/<project>/<env>/storage`. People can only read it.
 - The app lists the names it reads in `project.yaml`'s `secrets`: `S3_ACCESS_KEY_ID`,
   `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET` (`deployments`' guide), and passes them
   to its S3 client. Merge this first: until the storage exists, a deploy that lists them fails resolving
   them.
-- **Removing it** isn't deleting the line: the instance, credential and bucket are `prevent_destroy`, so
-  the plan fails. It's a PR of its own, with `removed` blocks, once the files are dealt with.
+- **Removing it** isn't deleting the line: the instance and the bucket are `prevent_destroy`, so the
+  plan fails. It's a PR of its own, with `removed` blocks, once the files are dealt with.
 - **Rotating a credential** isn't built yet: it takes replacing
   `glesys_objectstorage_credential.storage["<project>/<env>"]`, after which the next apply writes the new
-  one to OpenBao and the app needs a redeploy. Ask Platform.
+  one to OpenBao and the app needs a redeploy (tested on GleSYS 2026-10-30: the old key stops working,
+  the bucket is untouched). Ask Platform.
 
 ### 2.8 First deploy, to staging
 - The next build of `main` deploys it (or re-run the last `build` run). `deploy.yml` writes `release.yaml`'s
