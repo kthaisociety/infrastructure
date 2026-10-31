@@ -206,5 +206,6 @@ bucket made as above, locked for 1 day:
 - The local Dokploy backed up to that bucket with `keep: 2` (11.6 MB dumps, so multipart uploads): every
   dump was locked, and its delete of the oldest left a delete marker. Restoring the newest gave back
   every row. Deleting the marker brought the deleted dump back.
-- The lifecycle rule was accepted. That GleSYS runs it can only be seen once the locks expire: checked
-  on 2026-10-31.
+- GleSYS runs the lifecycle rule, checked on 2026-10-31: once their locks had run out, both deleted
+  dumps' old versions were gone. Their delete markers were still there at 10:06 UTC, when the test bucket
+  was deleted, so whether the rule removes those too isn't confirmed. They take next to no space.

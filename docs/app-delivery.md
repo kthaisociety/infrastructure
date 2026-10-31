@@ -167,10 +167,26 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
   `S3_BUCKET` for the single bucket, or `S3_BUCKET_<NAME>` per bucket of the list (`user-files` gives
   `S3_BUCKET_USER_FILES`). Merge this first: until the storage exists, a deploy that lists them fails
   resolving them.
-- **Adding a bucket** to the list is just that. **Removing one, or storage**, isn't deleting it: the
-  instance and the buckets are `prevent_destroy`, so the plan fails. It's a PR of its own, with
-  `removed` blocks, once the files are dealt with. Going from `{}` to a list is removing the single
-  bucket too.
+- **Adding a bucket** to the list is just that.
+- **Removing a bucket, or storage**, can't be done by deleting the line. The instance, the buckets and
+  the OpenBao secret are `prevent_destroy`, so the plan fails. `tofu destroy -target` is refused too, and
+  a `removed` block can't take one key of a `for_each`, only every project's buckets at once. So OpenTofu
+  forgets them, and they're deleted by hand. A platform admin, per environment:
+  1. In `deployments`, stop the app listing the names, or its next deploy fails resolving them.
+  2. Copy the files if they're needed, and empty the bucket.
+  3. In `terraform/glesys`, forget the bucket:
+     `tofu state rm 'minio_s3_bucket.storage["kthais-<project>-<env>-<bucket>"]'`. For the whole storage,
+     every bucket, then `'glesys_objectstorage_instance.storage["<project>/<env>"]'`, and in
+     `terraform/openbao`, `'vault_kv_secret_v2.storage["<project>/<env>"]'`.
+  4. Merge the PR removing the bucket or `storage` from `projects.yaml` straight away: until it's merged,
+     any apply would try to create them again. Removing a bucket only updates the storage secret; removing
+     storage makes OpenTofu delete the instance's two credentials itself.
+  5. Delete what's left by hand, with a temporary credential from the GleSYS UI: the bucket, and for the
+     whole storage the instance and the OpenBao secret.
+- **Renaming a bucket** isn't possible: S3 has no rename, and the name is also the variable's. Add the new
+  name next to the old one, copy the files across (one key reaches both), switch the app to the new
+  `S3_BUCKET_<NAME>`, in its code too, then remove the old bucket as above. Going from `{}` to a list is
+  the same: the single bucket can't become a named one.
 - **Rotating a credential** isn't built yet: it takes replacing
   `glesys_objectstorage_credential.storage["<project>/<env>"]`, after which the next apply writes the new
   one to OpenBao and the app needs a redeploy (tested on GleSYS 2026-10-30: the old key stops working,
