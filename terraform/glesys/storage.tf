@@ -14,8 +14,9 @@
 #
 # prevent_destroy on the instance and the buckets: they hold an app's live files. Removing `storage` from
 # a project, or a bucket from its list, fails the plan, and so would dropping an instance's provider
-# configuration while its buckets are still in state. Removing either is a deliberate PR of its own, with
-# `removed` blocks. Adding a bucket to the list is just that.
+# configuration while its buckets are still in state. Removing either means `tofu state rm` and deleting
+# by hand (docs/app-delivery.md, 2.7): a `removed` block can't take one key of a for_each. Adding a bucket
+# to the list is just that.
 
 locals {
   projects = yamldecode(file("${path.module}/../openbao/projects.yaml"))
