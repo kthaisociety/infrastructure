@@ -61,9 +61,14 @@ made in the console (APIs & Services → Credentials) of the project that holds 
 |---|---|---|---|
 | `kthais-identity` | not made yet | the identity service, and through it every KTHAIS app | |
 | `kthais-mattermost` | not made yet | `chat.aisociety.se` | Mattermost's own settings |
-| `kthais-lucid` | not made yet | Lucid's "Connect Gmail" (`lucid.kthais.com` and `lucid-staging.kthais.com`, at `/auth/gmail/callback`) | OpenBao, `secret/lucid/<env>`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
+| `kthais-lucid` | `lucid-gmail`, made 2026-11-05 | Lucid's "Connect Gmail" (`lucid.kthais.com` and `lucid-staging.kthais.com`, at `/auth/gmail/callback`) | OpenBao, `secret/lucid/<env>`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
 
 When a client is made, write its name and redirect addresses here.
+
+`lucid-gmail` sits behind a consent screen that is also made by hand (Google Auth Platform → Get started):
+app name `Lucid`, audience **Internal**, and `https://www.googleapis.com/auth/gmail.readonly` under Data
+access. Internal limits it to kthais.com accounts, which is why Gmail read-only, a restricted scope, needs
+no review by Google.
 
 - **A secret is shown once**, when it's made. If one is lost, add a new secret to the same client rather
   than making a new client: the client ID and redirect addresses stay.
