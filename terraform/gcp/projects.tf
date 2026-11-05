@@ -36,8 +36,8 @@ locals {
       apis   = ["people.googleapis.com"] # Mattermost reads the profile of whoever signs in
     }
 
-    # Lucid's Gmail client, for "Connect Gmail". Lucid signs people in through the identity client; this
-    # one only reads the mailbox someone connects, and has Lucid's own /auth/gmail/callback.
+    # Lucid's Gmail clients, one per environment, for "Connect Gmail". Lucid signs people in through the
+    # identity client; these only read the mailbox someone connects, at Lucid's own /auth/gmail/callback.
     kthais-lucid = {
       name = "lucid"
       owners = [
