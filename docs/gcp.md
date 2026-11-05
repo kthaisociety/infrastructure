@@ -8,18 +8,19 @@ KTHAIS uses Google Cloud for almost nothing but sign-in. An audit of the kthais.
 2026-10-11 found 42 projects and, across all of them, no machines, buckets or databases that we run.
 What we rely on is a handful of sign-in clients and one service account.
 
-The organization is being reduced to three projects:
+The organization is being reduced to four projects:
 
 | Name | ID | How it's made | What it holds |
 |---|---|---|---|
 | provisioner | set in `tofu.yml`, see below | By hand, once. The only project that isn't in code | The accounts CI runs OpenTofu as, and the sign-in from GitHub Actions |
 | identity | `kthais-identity` | By OpenTofu | The one Google sign-in client, used by the [identity service](identity-service.md), and the account that manages Google Workspace |
 | mattermost | `kthais-mattermost` | By OpenTofu | Mattermost's sign-in client |
+| lucid | `kthais-lucid` | By OpenTofu | Lucid's Gmail client, for "Connect Gmail". Lucid's sign-in goes through identity |
 
 ### Why the IDs start with `kthais-`
 
-We call the projects provisioner, identity and mattermost, and those are their names in the console.
-Their IDs can't be those words:
+We call the projects provisioner, identity, mattermost and lucid, and those are their names in the
+console. Their IDs can't be those words:
 
 - **An ID has to be unique across all of Google Cloud**, not only inside our organization. Bare words
   are long gone: someone else's project is already `mattermost`.
@@ -34,17 +35,18 @@ Every project that exists today is on its way out ([Projects being retired](#pro
 
 ## What's in code
 
-`terraform/gcp` creates `kthais-identity` and `kthais-mattermost`: the project, its owners, the APIs it
-needs, and in `kthais-identity` the `workspace-admin` service account. The list is `local.projects` in
-[`projects.tf`](../terraform/gcp/projects.tf).
+`terraform/gcp` creates `kthais-identity`, `kthais-mattermost` and `kthais-lucid`: the project, its
+owners, the APIs it needs, and in `kthais-identity` the `workspace-admin` service account. The list is
+`local.projects` in [`projects.tf`](../terraform/gcp/projects.tf).
 
 Google also turns on about twenty APIs of its own on every new project (BigQuery, Cloud Storage, Logging,
 Monitoring and others), on top of the ones we enable. They're free, we don't use them, and the code
 leaves them alone. The provisioner project has them too.
 
 A project's owners are exactly the members listed there, plus CI: someone made owner by hand is removed
-by the next apply. Other roles on a project aren't touched. For now the list is the two organization
-admins; [identity-service.md](identity-service.md) calls for a Google group, which has to exist first.
+by the next apply. Other roles on a project aren't touched. For identity and mattermost the list is the
+two organization admins; [identity-service.md](identity-service.md) calls for a Google group, which has
+to exist first. Lucid's owners are Sam and Angelos.
 
 ## Made by hand
 
@@ -59,6 +61,7 @@ made in the console (APIs & Services → Credentials) of the project that holds 
 |---|---|---|---|
 | `kthais-identity` | not made yet | the identity service, and through it every KTHAIS app | |
 | `kthais-mattermost` | not made yet | `chat.aisociety.se` | Mattermost's own settings |
+| `kthais-lucid` | not made yet | Lucid's "Connect Gmail" (`lucid.kthais.com` and `lucid-staging.kthais.com`, at `/auth/gmail/callback`) | OpenBao, `secret/lucid/<env>`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
 
 When a client is made, write its name and redirect addresses here.
 
@@ -86,7 +89,7 @@ and why the organization grew to 42 projects.
 
 ### Billing
 
-Neither project is linked to a billing account, and neither needs one: sign-in clients and the APIs we
+None of the projects is linked to a billing account, and none needs one: sign-in clients and the APIs we
 use are free. When KTHAIS's central billing account exists
 ([plan.md](plan.md#later-gcp-as-code) has the steps), set `billing_account` in
 [`variables.tf`](../terraform/gcp/variables.tf) and, by hand, give CI's apply account the Billing
@@ -185,8 +188,8 @@ are no key files.
 
 - Google accepts tokens from this repo only, matched by GitHub's org and repo IDs, not their names.
 - Each service account can be used from exactly one environment.
-- As owner of `kthais-identity` and `kthais-mattermost`, the apply account could read the sign-in
-  clients' secrets. `production` already holds secrets of that weight.
+- As owner of every project in `terraform/gcp`, the apply account could read the sign-in clients'
+  secrets. `production` already holds secrets of that weight.
 - Neither account has any role in the provisioner project itself.
 
 **If CI can't sign in**, the cause is in the provisioner project or on GitHub's side, since nothing in
