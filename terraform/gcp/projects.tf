@@ -39,9 +39,13 @@ locals {
     # Lucid's Gmail client, for "Connect Gmail". Lucid signs people in through the identity client; this
     # one only reads the mailbox someone connects, and has Lucid's own /auth/gmail/callback.
     kthais-lucid = {
-      name   = "lucid"
-      owners = ["user:sam@kthais.com", "user:angelos.zacharioudakis@kthais.com"]
-      apis   = ["gmail.googleapis.com"] # Lucid reads the mail of whoever connects Gmail
+      name = "lucid"
+      owners = [
+        "user:sam@kthais.com",
+        "user:angelos.zacharioudakis@kthais.com",
+        "user:pavlos.spanoudakis@kthais.com",
+      ]
+      apis = ["gmail.googleapis.com"] # Lucid reads the mail of whoever connects Gmail
     }
   }
 
