@@ -15,7 +15,7 @@ The organization is being reduced to four projects:
 | provisioner | set in `tofu.yml`, see below | By hand, once. The only project that isn't in code | The accounts CI runs OpenTofu as, and the sign-in from GitHub Actions |
 | identity | `kthais-identity` | By OpenTofu | The one Google sign-in client, used by the [identity service](identity-service.md), and the account that manages Google Workspace |
 | mattermost | `kthais-mattermost` | By OpenTofu | Mattermost's sign-in client |
-| lucid | `kthais-lucid` | By OpenTofu | Lucid's Gmail client, for "Connect Gmail". Lucid's sign-in goes through identity |
+| lucid | `kthais-lucid` | By OpenTofu | Lucid's Gmail clients, one per environment, for "Connect Gmail". Lucid's sign-in goes through identity |
 
 ### Why the IDs start with `kthais-`
 
@@ -61,9 +61,16 @@ made in the console (APIs & Services → Credentials) of the project that holds 
 |---|---|---|---|
 | `kthais-identity` | not made yet | the identity service, and through it every KTHAIS app | |
 | `kthais-mattermost` | not made yet | `chat.aisociety.se` | Mattermost's own settings |
-| `kthais-lucid` | not made yet | Lucid's "Connect Gmail" (`lucid.kthais.com` and `lucid-staging.kthais.com`, at `/auth/gmail/callback`) | OpenBao, `secret/lucid/<env>`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
+| `kthais-lucid` | `lucid-gmail-production`, made 2026-11-05 | Lucid's "Connect Gmail" on production, `https://lucid.kthais.com/auth/gmail/callback` | OpenBao, `secret/lucid/production`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
+| `kthais-lucid` | `lucid-gmail-staging`, made 2026-11-05 | Lucid's "Connect Gmail" on staging, `https://lucid-staging.kthais.com/auth/gmail/callback` | OpenBao, `secret/lucid/staging`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
 
 When a client is made, write its name and redirect addresses here.
+
+Lucid has one client per environment, each with only its own callback, so staging's client can't be used
+to get a production grant. Both sit behind one consent screen, also made by hand (Google Auth Platform →
+Get started): app name `Lucid`, audience **Internal**, and
+`https://www.googleapis.com/auth/gmail.readonly` under Data access. Internal limits it to kthais.com
+accounts, which is why Gmail read-only, a restricted scope, needs no review by Google.
 
 - **A secret is shown once**, when it's made. If one is lost, add a new secret to the same client rather
   than making a new client: the client ID and redirect addresses stay.
