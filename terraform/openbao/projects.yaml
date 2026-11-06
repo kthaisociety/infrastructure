@@ -31,3 +31,5 @@ kthais-frontend: {}
 pyrmit-frontend: {}
 
 pyrmit-backend: {}
+
+identity-service: {}
