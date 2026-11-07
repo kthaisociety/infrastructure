@@ -24,7 +24,11 @@ onboarding-service: {}
 
 lucid: {}
 
-kthais-backend: {}
+# One private bucket for resumes, profile pictures, project media and logos (IT-93). A list rather than
+# {}, so a public bucket (IT-85) can be added next to it without moving these files.
+kthais-backend:
+  storage:
+    buckets: [files]
 
 kthais-frontend: {}
 
