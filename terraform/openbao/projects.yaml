@@ -37,3 +37,5 @@ pyrmit-frontend: {}
 pyrmit-backend: {}
 
 identity-service: {}
+
+kth-course-community: {}
