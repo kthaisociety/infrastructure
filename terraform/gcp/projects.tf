@@ -21,8 +21,12 @@ locals {
     # The identity service's project: the one Google sign-in client every KTHAIS app goes through, and
     # the account that manages Google Workspace (identity.tf).
     kthais-identity = {
-      name   = "identity"
-      owners = ["user:sam@kthais.com", "user:vilhelm@kthais.com"]
+      name = "identity"
+      owners = [
+        "user:sam@kthais.com",
+        "user:vilhelm@kthais.com",
+        "user:pavlos.spanoudakis@kthais.com",
+      ]
       apis = [
         "admin.googleapis.com", # Admin SDK: Workspace accounts
         "iam.googleapis.com",   # for the service account in identity.tf
