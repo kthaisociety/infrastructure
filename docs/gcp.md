@@ -44,9 +44,10 @@ Monitoring and others), on top of the ones we enable. They're free, we don't use
 leaves them alone. The provisioner project has them too.
 
 A project's owners are exactly the members listed there, plus CI: someone made owner by hand is removed
-by the next apply. Other roles on a project aren't touched. For identity and mattermost the list is the
-two organization admins; [identity-service.md](identity-service.md) calls for a Google group, which has
-to exist first. Lucid's owners are Sam, Angelos and Pavlos.
+by the next apply. Other roles on a project aren't touched. For mattermost the list is the two
+organization admins; [identity-service.md](identity-service.md) calls for a Google group, which has to
+exist first. Identity's owners are the two organization admins and Pavlos, Lucid's are Sam, Angelos and
+Pavlos.
 
 ## Made by hand
 

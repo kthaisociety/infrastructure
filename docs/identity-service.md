@@ -41,7 +41,7 @@ IDs, so it's created by hand once in that project. Its authorized redirect URIs 
 service's own callbacks, one per environment.
 
 The project is meant to be owned by a Google group rather than by people. Until that group exists, its
-owners are sam and vilhelm.
+owners are sam, vilhelm and pavlos.
 
 Apps register with the identity service instead of Google. Their allowed redirect URIs are an exact-match
 allowlist in the identity service's config, set through env in `deployments`
