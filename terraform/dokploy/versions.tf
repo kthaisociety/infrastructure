@@ -41,7 +41,8 @@ terraform {
       method   = method.aes_gcm.state
       enforced = true
     }
-    # terraform/glesys's state, read for the database backups credential. Same passphrase.
+    # terraform/glesys's state, read for the database backups credential, and terraform/openbao's, for
+    # MLflow's provider token (mlflow.tf). Same passphrase.
     remote_state_data_sources {
       default {
         method = method.aes_gcm.state

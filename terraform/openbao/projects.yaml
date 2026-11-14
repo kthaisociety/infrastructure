@@ -35,3 +35,9 @@ kthais-frontend: {}
 pyrmit-frontend: {}
 
 pyrmit-backend: {}
+
+# MLflow (IT-36). Not a kthaisociety/deployments project: a compose in terraform/dokploy (mlflow.tf),
+# which reads its bucket's credentials from secret/mlflow/production/storage.
+mlflow:
+  environments: [production]
+  storage: {}

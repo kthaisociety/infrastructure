@@ -8,7 +8,7 @@ to restore.
 | | |
 |---|---|
 | What | Each project's **production** Postgres: `pg_dump -Fc`, gzipped by Dokploy |
-| Not | Staging; Redis; Postgres outside the pipeline (the website's has its own, in `website-psql-backups`) |
+| Not | Staging; Redis; Postgres outside the pipeline (the website's has its own, in `website-psql-backups`), except MLflow's, which `terraform/dokploy/mlflow.tf` backs up the same way ([mlflow.md](mlflow.md)) |
 | When | Every day at 00:00 UTC (Dokploy's clock, `0 0 * * *`), unless the project sets its own `schedule` |
 | Kept | The last 30 dumps of each database (a month, at the default schedule), unless the project sets its own `keep` (at least 7) |
 | Where | GleSYS instance `database-backups`, bucket `kthais-database-backups`, `<app_name>/<timestamp>.sql.gz` |
