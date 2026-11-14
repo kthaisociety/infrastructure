@@ -34,11 +34,11 @@ Every client in use and the project that holds it is listed in
 | kthais.com sign-in | `clean-healer-452020-n9` ("website") | vilhelm only |
 | Mattermost (chat.aisociety.se) | `mattermost-423409` | vilhelm only |
 
-The identity service gets a **new** Google OAuth client in its own GCP project, `kthais-identity`, which
+The identity service has **new** Google OAuth clients in its own GCP project, `kthais-identity`, which
 `terraform/gcp` created on 2026-10-13 ([gcp.md](gcp.md)). The project, its APIs and its owners are in
-code. The client isn't made yet: as far as we know, Google has no API for creating standard OAuth client
-IDs, so it's created by hand once in that project. Its authorized redirect URIs are only the identity
-service's own callbacks, one per environment.
+code. The clients were made by hand on 2026-11-14, since as far as we know Google has no API for creating
+standard OAuth client IDs: `identity-staging` and `identity-production`, each with only its own
+environment's callback ([gcp.md](gcp.md#sign-in-clients) has their details and the consent screen).
 
 The project is meant to be owned by a Google group rather than by people. Until that group exists, its
 owners are sam, vilhelm and pavlos.
