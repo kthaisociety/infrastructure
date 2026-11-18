@@ -125,6 +125,12 @@ role=infra-admin`), or the UI at `https://bao.kthais.com/ui`:
   **inert** ones when the app can act on real accounts (onboarding-service: a service-account JSON with no
   real key, a dummy Mattermost token, its own shared secret; see
   [onboarding-service-migration.md](onboarding-service-migration.md)).
+- **The staging gate (IT-97):** every staging app asks for a username and password before anything loads
+  (`deployments`' `staging_gate.tf`). The password is one value for all of staging, at
+  `secret/shared/staging-gate`, key `password`, and in 1Password as "Staging gate". Only `deployments`'
+  CI can read the OpenBao copy, not the apps. To rotate it, `bao kv put -mount=secret shared/staging-gate
+  password=-` with the new value, update 1Password, and run `deployments`' `tofu` workflow: the new
+  version reaches every staging app at that apply.
 
 ### 2.4 Its Dokploy side, in `deployments`
 - `projects/<project>/project.yaml` (format in 6.2) and `projects/<project>/release.yaml` with a line per
