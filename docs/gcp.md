@@ -8,7 +8,7 @@ KTHAIS uses Google Cloud for almost nothing but sign-in. An audit of the kthais.
 2026-10-11 found 42 projects and, across all of them, no machines, buckets or databases that we run.
 What we rely on is a handful of sign-in clients and one service account.
 
-The organization is being reduced to four projects:
+The organization is being reduced to five projects:
 
 | Name | ID | How it's made | What it holds |
 |---|---|---|---|
@@ -16,11 +16,12 @@ The organization is being reduced to four projects:
 | identity | `kthais-identity` | By OpenTofu | The one Google sign-in client, used by the [identity service](identity-service.md), and the account that manages Google Workspace |
 | mattermost | `kthais-mattermost` | By OpenTofu | Mattermost's sign-in client |
 | lucid | `kthais-lucid` | By OpenTofu | Lucid's Gmail clients, one per environment, for "Connect Gmail". Lucid's sign-in goes through identity |
+| course-community | `kthais-course-community` | By OpenTofu | KTH Course Community's sign-in clients, one per environment. It signs people in itself, not through identity |
 
 ### Why the IDs start with `kthais-`
 
-We call the projects provisioner, identity, mattermost and lucid, and those are their names in the
-console. Their IDs can't be those words:
+We call the projects provisioner, identity, mattermost, lucid and course-community, and those are their
+names in the console. Their IDs can't be those words:
 
 - **An ID has to be unique across all of Google Cloud**, not only inside our organization. Bare words
   are long gone: someone else's project is already `mattermost`.
@@ -35,9 +36,10 @@ Every project that exists today is on its way out ([Projects being retired](#pro
 
 ## What's in code
 
-`terraform/gcp` creates `kthais-identity`, `kthais-mattermost` and `kthais-lucid`: the project, its
-owners, the APIs it needs, and in `kthais-identity` the `workspace-admin` service account. The list is
-`local.projects` in [`projects.tf`](../terraform/gcp/projects.tf).
+`terraform/gcp` creates `kthais-identity`, `kthais-mattermost`, `kthais-lucid` and
+`kthais-course-community`: the project, its owners, the APIs it needs, and in `kthais-identity` the
+`workspace-admin` service account. The list is `local.projects` in
+[`projects.tf`](../terraform/gcp/projects.tf).
 
 Google also turns on about twenty APIs of its own on every new project (BigQuery, Cloud Storage, Logging,
 Monitoring and others), on top of the ones we enable. They're free, we don't use them, and the code
@@ -47,7 +49,7 @@ A project's owners are exactly the members listed there, plus CI: someone made o
 by the next apply. Other roles on a project aren't touched. For mattermost the list is the two
 organization admins; [identity-service.md](identity-service.md) calls for a Google group, which has to
 exist first. Identity's owners are the two organization admins and Pavlos, Lucid's are Sam, Angelos and
-Pavlos.
+Pavlos, and Course Community's are Sam and Pavlos.
 
 ## Made by hand
 
@@ -64,6 +66,8 @@ made in the console (APIs & Services → Credentials) of the project that holds 
 | `kthais-mattermost` | not made yet | `chat.aisociety.se` | Mattermost's own settings |
 | `kthais-lucid` | `lucid-gmail-production`, made 2026-11-05 | Lucid's "Connect Gmail" on production, `https://lucid.kthais.com/auth/gmail/callback` | OpenBao, `secret/lucid/production`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
 | `kthais-lucid` | `lucid-gmail-staging`, made 2026-11-05 | Lucid's "Connect Gmail" on staging, `https://lucid-staging.kthais.com/auth/gmail/callback` | OpenBao, `secret/lucid/staging`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
+| `kthais-course-community` | not made yet | KTH Course Community's sign-in on production, `https://kthcoursecommunity.kthais.com/api/auth/callback/google` | OpenBao, `secret/kth-course-community/production`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` |
+| `kthais-course-community` | not made yet | KTH Course Community's sign-in on staging, `https://kthcoursecommunity-staging.kthais.com/api/auth/callback/google` | OpenBao, `secret/kth-course-community/staging`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` |
 
 When a client is made, write its name and redirect addresses here.
 
@@ -72,6 +76,13 @@ to get a production grant. Both sit behind one consent screen, also made by hand
 Get started): app name `Lucid`, audience **Internal**, and
 `https://www.googleapis.com/auth/gmail.readonly` under Data access. Internal limits it to kthais.com
 accounts, which is why Gmail read-only, a restricted scope, needs no review by Google.
+
+KTH Course Community gets one client per environment too, for the same reason. Its consent screen is
+the opposite of Lucid's: audience **External**, because its users are any KTH student, signing in with
+whatever Google account they have. An External screen left in Testing only lets the test users listed
+on it sign in, so it has to be published. It asks for nothing beyond sign-in (`openid`, `email`,
+`profile`). It is an exception to "every app signs in through identity": identity only covers
+kthais.com sign-ins for now (Linear IT-53).
 
 - **A secret is shown once**, when it's made. If one is lost, add a new secret to the same client rather
   than making a new client: the client ID and redirect addresses stay.
@@ -214,16 +225,19 @@ exist once that PR is applied.
 ## Projects being retired
 
 None of the projects that existed before this module is in code. Each stays as it is until nothing uses
-it, then it's deleted. Sign-in runs on three of them today:
+it, then it's deleted. These are the ones something still depends on, or that belong to an app in use:
 
 | Project | Holds | Goes when |
 |---|---|---|
 | `clean-healer-452020-n9` ("website") | Sign-in clients: `production-client` (kthais.com), `kortslutning-production` (`app.ktha.is`), `openbao` (`bao.kthais.com`), and `dev-client` (**use not known**, made 2026-09-27) | kthais.com, kortslutning and OpenBao sign in through the identity service |
 | `mattermost-423409` | Sign-in client `Mattermost - KTH AI Society` (`chat.aisociety.se`) | Mattermost is switched to a new client in `kthais-mattermost` |
+| `course-community-507412` ("Course Community") | Sign-in client `dev`: KTH Course Community's hand-made app, on `kthcoursecommunity-dev.kthais.com` | Course Community runs on the pipeline with its new clients in `kthais-course-community` (IT-53) |
+| `kth-course-community` | Sign-in client `Web client 1`. The deployed app doesn't use it | With `course-community-507412`, once its owner confirms nothing else uses it |
 | `kthais-website-492616` ("KTHAIS-website") | `onboarding-service-account` and its key, in OpenBao as `GOOGLE_ADMIN_SERVICE_ACCOUNT_JSON` ([onboarding-service-migration.md](onboarding-service-migration.md)) | the identity service manages Workspace with `workspace-admin` |
 
-`production-client` and Mattermost's client are confirmed by where the live sites send a sign-in. The
-other two named clients are matched by name only.
+`production-client` and Mattermost's client are confirmed by where the live sites send a sign-in, and
+Course Community's `dev` by the client ID in its app's settings (2026-11-10). The other two named clients
+in "website" are matched by name only.
 
 > ⚠️ **A project that only holds sign-in clients looks dead.** It has no resources, makes no API calls and
 > never changes, so every usage signal Google offers says it's unused. `mattermost-423409` is one, and
@@ -231,5 +245,6 @@ other two named clients are matched by name only.
 > Credentials page in the console and look for clients.
 
 **Members' own projects.** A project that exists only for Google sign-in isn't needed: the app should
-sign in through the identity service instead. Projects with another purpose, and the ones Google makes on
-its own for AI Studio API keys, are decided case by case.
+sign in through the identity service instead. An app whose users aren't kthais.com accounts, like KTH
+Course Community, gets a project in code instead (above). Projects with another purpose, and the ones
+Google makes on its own for AI Studio API keys, are decided case by case.

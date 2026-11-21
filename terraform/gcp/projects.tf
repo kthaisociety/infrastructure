@@ -51,6 +51,15 @@ locals {
       ]
       apis = ["gmail.googleapis.com"] # Lucid reads the mail of whoever connects Gmail
     }
+
+    # KTH Course Community's Google sign-in clients, one per environment. Its users are any KTH student
+    # and identity only covers kthais.com sign-ins for now, so it signs people in itself, an
+    # exception to identity-service's ADR 0002 (Linear IT-53). Sign-in needs no API.
+    kthais-course-community = {
+      name   = "course-community"
+      owners = ["user:sam@kthais.com", "user:pavlos.spanoudakis@kthais.com"]
+      apis   = []
+    }
   }
 
   project_apis = merge([
