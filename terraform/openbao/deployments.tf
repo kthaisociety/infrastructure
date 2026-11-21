@@ -1,9 +1,9 @@
 # kthaisociety/deployments' CI login. It mints each project's Dokploy provider token, through the
-# dokploy-provider role, and writes the credentials of the databases it creates, at
-# secret/<project>/<env>/database/<engine>. Nothing else in OpenBao. In particular it can't write
-# policies: a dokploy-project-* policy's contents decide what a token minted with it can read, so those
-# policies, and the projects' empty secret paths, are written only by this repo (projects.tf). And it
-# can't write any secret a person fills in.
+# dokploy-provider role, writes the credentials of the databases it creates, at
+# secret/<project>/<env>/database/<engine>, and reads the staging gate's password. Nothing else in
+# OpenBao. In particular it can't write policies: a dokploy-project-* policy's contents decide what a
+# token minted with it can read, so those policies, and the projects' empty secret paths, are written
+# only by this repo (projects.tf). And it can't write any secret a person fills in.
 #
 # What it can still do: mint a token with any project's policy, and so read app secrets. That's inherent
 # to wiring Dokploy's providers, and why the login is bound to deployments' production environment (main
@@ -42,6 +42,17 @@ resource "vault_policy" "deployments" {
     path "secret/*" {
       capabilities = ["deny"]
     }
+
+    # The staging gate's basic-auth password (IT-97), which an admin writes. Read only: deployments puts
+    # it on every staging app with dokploy_security. The metadata gives the current version, so a new
+    # version reaches Dokploy at the next apply. Exact paths, so they win over the secret/* deny above.
+    # Apps can't read it: their policies read secret/shared/<environment>, not this path.
+    path "secret/data/shared/staging-gate" {
+      capabilities = ["read"]
+    }
+    path "secret/metadata/shared/staging-gate" {
+      capabilities = ["read"]
+    }
   EOT
     ],
     # Database credentials, one block per project environment in projects.yaml (projects.tf). Each path
@@ -78,4 +89,13 @@ resource "vault_jwt_auth_backend_role" "deployments_ci" {
   token_policies = [vault_policy.deployments.name]
   token_ttl      = 1800
   token_max_ttl  = 3600
+}
+
+# The staging gate's password: the path exists, empty, so an admin can fill it in the UI. Metadata only,
+# never deleted by OpenTofu. One key, `password`; the same value is in 1Password as "Staging gate".
+resource "vault_generic_endpoint" "staging_gate" {
+  path                 = "${vault_mount.secret.path}/metadata/shared/staging-gate"
+  data_json            = jsonencode({ custom_metadata = { managed_by = "kthaisociety/infrastructure" } })
+  ignore_absent_fields = true
+  disable_delete       = true
 }
