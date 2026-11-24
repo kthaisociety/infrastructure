@@ -62,7 +62,8 @@ made in the console (APIs & Services → Credentials) of the project that holds 
 
 | Project | Client | Used by | Its ID and secret are set in |
 |---|---|---|---|
-| `kthais-identity` | not made yet | the identity service, and through it every KTHAIS app | |
+| `kthais-identity` | `identity-production`, made 2026-11-14 | the identity service on production, `https://identity.kthais.com/auth/callback`, and through it every KTHAIS app | OpenBao, `secret/identity-service/production`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` |
+| `kthais-identity` | `identity-staging`, made 2026-11-14 | the identity service on staging, `https://identity-staging.kthais.com/auth/callback` | OpenBao, `secret/identity-service/staging`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` |
 | `kthais-mattermost` | not made yet | `chat.aisociety.se` | Mattermost's own settings |
 | `kthais-lucid` | `lucid-gmail-production`, made 2026-11-05 | Lucid's "Connect Gmail" on production, `https://lucid.kthais.com/auth/gmail/callback` | OpenBao, `secret/lucid/production`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
 | `kthais-lucid` | `lucid-gmail-staging`, made 2026-11-05 | Lucid's "Connect Gmail" on staging, `https://lucid-staging.kthais.com/auth/gmail/callback` | OpenBao, `secret/lucid/staging`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
@@ -99,6 +100,20 @@ How that screen is set up, for a rebuild (Google Auth Platform → Branding and 
   than making a new client: the client ID and redirect addresses stay.
 - **Google deletes a client nobody has signed in through for six months**, after marking it "unused" in
   the console. A deleted client can be restored for 30 days.
+
+Identity also has one client per environment, each with only its own callback. Both sit behind one
+consent screen, made by hand the same way:
+
+- **App name `KTH AI Society`.** Google shows it on the sign-in of every KTHAIS app ("to continue to KTH AI
+  Society"), since they all sign in through identity. The society's name means something to a member
+  whichever app sent them; one app's name, or "identity", wouldn't.
+- **Audience Internal:** only kthais.com accounts sign in, as decided on IT-86 for now. Opening it to
+  other accounts is a change of audience (Google Auth Platform → Audience), and can bring Google's
+  verification.
+- **User support email `pavlos.spanoudakis@kthais.com`:** the wizard offers only your own address and
+  groups you manage. Change it (Branding) once a shared group exists.
+- **Developer contacts:** Pavlos, Sam, Teoman and `ops@kthais.com`, where Google sends notices about the
+  project, such as a client about to be deleted.
 
 ### The Workspace admin account
 
