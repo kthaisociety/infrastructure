@@ -66,8 +66,8 @@ made in the console (APIs & Services → Credentials) of the project that holds 
 | `kthais-mattermost` | not made yet | `chat.aisociety.se` | Mattermost's own settings |
 | `kthais-lucid` | `lucid-gmail-production`, made 2026-11-05 | Lucid's "Connect Gmail" on production, `https://lucid.kthais.com/auth/gmail/callback` | OpenBao, `secret/lucid/production`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
 | `kthais-lucid` | `lucid-gmail-staging`, made 2026-11-05 | Lucid's "Connect Gmail" on staging, `https://lucid-staging.kthais.com/auth/gmail/callback` | OpenBao, `secret/lucid/staging`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
-| `kthais-course-community` | not made yet | KTH Course Community's sign-in on production, `https://kthcoursecommunity.kthais.com/api/auth/callback/google` | OpenBao, `secret/kth-course-community/production`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` |
-| `kthais-course-community` | not made yet | KTH Course Community's sign-in on staging, `https://kthcoursecommunity-staging.kthais.com/api/auth/callback/google` | OpenBao, `secret/kth-course-community/staging`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` |
+| `kthais-course-community` | `course-community-production`, made 2026-11-24 | KTH Course Community's sign-in on production, `https://kthcoursecommunity.kthais.com/api/auth/callback/google` | OpenBao, `secret/kth-course-community/production`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` |
+| `kthais-course-community` | `course-community-staging`, made 2026-11-24 | KTH Course Community's sign-in on staging, `https://kthcoursecommunity-staging.kthais.com/api/auth/callback/google` | OpenBao, `secret/kth-course-community/staging`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` |
 
 When a client is made, write its name and redirect addresses here.
 
@@ -83,6 +83,17 @@ whatever Google account they have. An External screen left in Testing only lets 
 on it sign in, so it has to be published. It asks for nothing beyond sign-in (`openid`, `email`,
 `profile`). It is an exception to "every app signs in through identity": identity only covers
 kthais.com sign-ins for now (Linear IT-53).
+
+How that screen is set up, for a rebuild (Google Auth Platform → Branding and Audience):
+
+- **App name** `KTH Course Community`, which is what people see when they sign in.
+- **Home page** `https://kthcoursecommunity.kthais.com`, **privacy policy**
+  `https://kthais.com/legal/privacy-and-cookies` and **terms of service**
+  `https://kthais.com/legal/terms-and-conditions`: the same pages the app's own emails link to. Google
+  asks for a home page and a privacy policy before an External screen can be published.
+- **Authorized domain** `kthais.com`, which covers both callbacks.
+- **Publishing status** In production, since 2026-11-24. With only the sign-in scopes, Google doesn't
+  review the app.
 
 - **A secret is shown once**, when it's made. If one is lost, add a new secret to the same client rather
   than making a new client: the client ID and redirect addresses stay.
