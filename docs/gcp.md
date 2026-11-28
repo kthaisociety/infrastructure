@@ -67,8 +67,7 @@ made in the console (APIs & Services → Credentials) of the project that holds 
 | `kthais-lucid` | `lucid-gmail-production`, made 2026-11-05 | Lucid's "Connect Gmail" on production, `https://lucid.kthais.com/auth/gmail/callback` | OpenBao, `secret/lucid/production`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
 | `kthais-lucid` | `lucid-gmail-staging`, made 2026-11-05 | Lucid's "Connect Gmail" on staging, `https://lucid-staging.kthais.com/auth/gmail/callback` | OpenBao, `secret/lucid/staging`, as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` |
 | `kthais-course-community` | `course-community-production`, made 2026-11-24 | KTH Course Community's sign-in on production, `https://kthcoursecommunity.kthais.com/api/auth/callback/google` | OpenBao, `secret/kth-course-community/production`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` |
-| `kthais-course-community` | `course-community-staging`, made 2026-11-24 | KTH Course Community's sign-in on staging, `https://kthcoursecommunity-staging.kthais.com/api/auth/callback/google` | OpenBao, `secret/kth-course-community/staging`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` |
-| `kthais-course-community` | `course-community-development`, made 2026-11-26 | KTH Course Community's sign-in on a developer's own machine, `http://localhost:3000/api/auth/callback/google` | OpenBao, `secret/kth-course-community/development`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; developers set them in their own `.env.local` |
+| `kthais-course-community` | `course-community-staging`, made 2026-11-24 | KTH Course Community's sign-in on staging, `https://kthcoursecommunity-staging.kthais.com/api/auth/callback/google`, and on a developer's own machine, `http://localhost:3000/api/auth/callback/google` (added 2026-11-28) | OpenBao, `secret/kth-course-community/staging`, as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` |
 
 When a client is made, write its name and redirect addresses here.
 
@@ -92,16 +91,16 @@ How that screen is set up, for a rebuild (Google Auth Platform → Branding and 
   `https://kthais.com/legal/privacy-and-cookies` and **terms of service**
   `https://kthais.com/legal/terms-and-conditions`: the same pages the app's own emails link to. Google
   asks for a home page and a privacy policy before an External screen can be published.
-- **Authorized domain** `kthais.com`, which covers the production and staging callbacks. The
-  development client's `localhost` needs none.
+- **Authorized domain** `kthais.com`, which covers the production and staging callbacks. The staging
+  client's `localhost` needs none.
 - **Publishing status** In production, since 2026-11-24. With only the sign-in scopes, Google doesn't
   review the app.
 
-The development client exists so the app's sign-in works on `localhost`. It's a client of its own, so
-its secret, which developers keep on their machines, can't be used against staging's or production's
-callbacks. It's also the client most likely to go quiet: Google deletes one nobody has signed in through
-for six months (below). If that happens, restore it within 30 days, or make a new one with the same
-redirect address and replace the values in OpenBao.
+Local development signs in through the staging client, which also allows `localhost`, so developers
+keep staging's ID and secret in their own `.env.local`. Staging holds no real data, and the client
+asks only for sign-in, so a secret kept on laptops is a small risk (Linear IT-53). It's also one client
+fewer to keep alive: a development client of its own would be the one most likely to sit unused for six
+months (below).
 
 - **A secret is shown once**, when it's made. If one is lost, add a new secret to the same client rather
   than making a new client: the client ID and redirect addresses stay.
